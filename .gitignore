@@ -1,0 +1,12 @@
+.env
+PX4-Autopilot/
+Micro-XRCE-DDS-Agent/
+px4_ws/build/
+px4_ws/install/
+px4_ws/log/
+px4_ws/src/px4_msgs/
+px4_ws/src/px4_ros_com/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.ulg

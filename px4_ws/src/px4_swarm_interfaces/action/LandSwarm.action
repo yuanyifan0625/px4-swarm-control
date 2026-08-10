@@ -1,0 +1,9 @@
+# Land-all 是全隊 recovery 入口，不帶單機目標避免繞過 swarm supervisor。
+float32 timeout_sec
+---
+bool success
+string message
+---
+string current_state
+uint8 vehicles_landed
+uint8 total_vehicles

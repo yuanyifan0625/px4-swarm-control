@@ -1,0 +1,10 @@
+# 只傳 formation mode，避免 operator 直接控制 follower slot。
+string formation_mode
+float32 timeout_sec
+---
+bool success
+string message
+---
+string current_state
+string active_formation
+float32 progress

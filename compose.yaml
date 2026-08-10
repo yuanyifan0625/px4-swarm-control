@@ -1,0 +1,38 @@
+services:
+  ros2_jazzy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_ID: ${USER_ID:-1000}
+        GROUP_ID: ${GROUP_ID:-1000}
+        USER_NAME: ${USER_NAME:-ncrl}
+        PROJECT_DIR: ${CONTAINER_PROJECT_DIR:-/home/ncrl/docker_ubuntu24}
+        ROS_WS: ${CONTAINER_ROS_WS:-/home/ncrl/docker_ubuntu24/px4_ws}
+
+    image: ${IMAGE_NAME:-ubuntu24-ros2-jazzy}:${IMAGE_TAG:-latest}
+    container_name: ${CONTAINER_NAME:-ubuntu24_ros2_jazzy_dev}
+
+    working_dir: ${CONTAINER_PROJECT_DIR:-/home/ncrl/docker_ubuntu24}
+
+    environment:
+      USER: ${USER_NAME:-ncrl}
+      HOME: /home/${USER_NAME:-ncrl}
+      PROJECT_DIR: ${CONTAINER_PROJECT_DIR:-/home/ncrl/docker_ubuntu24}
+      ROS_WS: ${CONTAINER_ROS_WS:-/home/ncrl/docker_ubuntu24/px4_ws}
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      DISPLAY: ${DISPLAY}
+      QT_X11_NO_MITSHM: "1"
+
+    volumes:
+      - type: bind
+        source: ${HOST_PROJECT_DIR:-.}
+        target: ${CONTAINER_PROJECT_DIR:-/home/ncrl/docker_ubuntu24}
+      - type: bind
+        source: /tmp/.X11-unix
+        target: /tmp/.X11-unix
+
+    network_mode: host
+    ipc: host
+    stdin_open: true
+    tty: true
