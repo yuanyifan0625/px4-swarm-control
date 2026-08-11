@@ -234,6 +234,10 @@ def test_vehicle_status_detects_all_staged_and_logs_progress_once():
         status = VehicleStatus()
         status.vehicle_id = vehicle_id
         status.x, status.y, status.z = point
+        status.armed = True
+        status.nav_state = 'offboard'
+        status.offboard_available = True
+        status.last_telemetry_age_sec = 0.1
         status.vehicle_state = 'holding'
         core.handle_vehicle_status(status)
 
@@ -243,10 +247,61 @@ def test_vehicle_status_detects_all_staged_and_logs_progress_once():
     status = VehicleStatus()
     status.vehicle_id = 3
     status.x, status.y, status.z = (-3.0, -4.0, -5.0)
+    status.armed = True
+    status.nav_state = 'offboard'
+    status.offboard_available = True
+    status.last_telemetry_age_sec = 0.1
     status.vehicle_state = 'holding'
     core.handle_vehicle_status(status)
 
     assert logger.infos.count('all vehicles reached staging positions') == 1
+
+
+def test_vehicle_status_does_not_mark_staged_without_armed_telemetry_and_offboard_ready():
+    core, _, logger = make_core()
+    request = TakeoffSwarm.Goal()
+    request.altitude_m = 5.0
+    core.handle_takeoff(request)
+
+    for vehicle_id, point in (
+        (1, (0.0, 0.0, -5.0)),
+        (2, (-3.0, 4.0, -5.0)),
+        (3, (-3.0, -4.0, -5.0)),
+    ):
+        status = VehicleStatus()
+        status.vehicle_id = vehicle_id
+        status.x, status.y, status.z = point
+        status.vehicle_state = 'holding'
+        status.last_telemetry_age_sec = float('inf')
+        core.handle_vehicle_status(status)
+
+    assert core.mission_state is MissionState.TAKING_OFF
+    assert 'all vehicles reached staging positions' not in logger.infos
+
+
+def test_vehicle_status_does_not_mark_staged_with_stale_finite_telemetry_age():
+    core, _, logger = make_core()
+    request = TakeoffSwarm.Goal()
+    request.altitude_m = 5.0
+    core.handle_takeoff(request)
+
+    for vehicle_id, point in (
+        (1, (0.0, 0.0, -5.0)),
+        (2, (-3.0, 4.0, -5.0)),
+        (3, (-3.0, -4.0, -5.0)),
+    ):
+        status = VehicleStatus()
+        status.vehicle_id = vehicle_id
+        status.x, status.y, status.z = point
+        status.armed = True
+        status.nav_state = 'offboard'
+        status.offboard_available = True
+        status.last_telemetry_age_sec = 5.0
+        status.vehicle_state = 'staging'
+        core.handle_vehicle_status(status)
+
+    assert core.mission_state is MissionState.TAKING_OFF
+    assert 'all vehicles reached staging positions' not in logger.infos
 
 
 def test_ground_station_node_starts_under_swarm_namespace_with_actions(monkeypatch):

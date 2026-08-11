@@ -109,6 +109,7 @@ class VehicleState:
     offboard_available: bool
     telemetry_age_s: float
     vehicle_level_state: VehicleLevelState
+    landed: bool = False
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import nan
 from re import search
-from typing import Any, Dict, Tuple
+from time import monotonic
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from px4_swarm_control.bridge_config import (
     FIRST_VERSION_BY_VEHICLE_ID,
@@ -40,20 +41,36 @@ class VehicleNodeConfig:
     control_loop_hz: float = 20.0
     status_loop_hz: float = 5.0
     telemetry_timeout_s: float = 0.5
+    takeoff_altitude_tolerance_m: float = 1.0
+    offboard_warmup_s: float = 1.0
+    offboard_mode_retry_s: float = 1.0
 
 
 class VehicleNodeCore:
     """Testable vehicle behavior that does not depend on the ROS node runtime."""
 
-    def __init__(self, config, px4_interface, status_publisher, logger) -> None:
+    def __init__(
+        self,
+        config,
+        px4_interface,
+        status_publisher,
+        logger,
+        now_s: Optional[Callable[[], float]] = None,
+    ) -> None:
         self.config = config
         self.px4_interface = px4_interface
         self.status_publisher = status_publisher
         self.logger = logger
+        self._now_s = now_s or monotonic
         self.vehicle_level_state = VehicleLevelState.IDLE
         self.active_setpoint = config.hold_setpoint
         self._warned_ignored_leader_goal = False
         self._warned_mismatched_vehicle_state = False
+        self._takeoff_to_staging_active = False
+        self._pending_takeoff_until_staging = False
+        self._staging_setpoint_received = False
+        self._offboard_warmup_started_s: Optional[float] = None
+        self._last_offboard_mode_request_s: Optional[float] = None
         self._sync_interface_state()
 
     def handle_leader_goal(self, msg: LeaderGoal) -> None:
@@ -74,6 +91,10 @@ class VehicleNodeCore:
         # 只接受自己的 staging 目標，保護多機共用 topic 流程下不追錯飛機位置。
         self.active_setpoint = PositionYawSetpoint(msg.x, msg.y, msg.z, msg.yaw)
         self.transition_to(VehicleLevelState.STAGING, 'staging setpoint accepted')
+        self._staging_setpoint_received = True
+        if self._pending_takeoff_until_staging:
+            self._pending_takeoff_until_staging = False
+            self._start_takeoff_without_qgc()
 
     def handle_mission_command(self, msg: MissionCommand) -> None:
         if msg.command == MissionCommand.TAKEOFF:
@@ -91,10 +112,19 @@ class VehicleNodeCore:
             self.transition_to(VehicleLevelState.HOLDING, 'resume command accepted')
 
     def _start_takeoff_without_qgc(self) -> None:
-        # 起飛前先 warm up Offboard 訊號，保護 SITL 不需要 QGC 才能 arm/takeoff。
-        self.px4_interface.publish_offboard_heartbeat()
-        self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
-        self.px4_interface.set_offboard_mode()
+        if not self._staging_setpoint_received:
+            # TAKEOFF 可能比 staging topic 先到，等待目標可避免用 hold altitude 起飛到錯高度。
+            self._pending_takeoff_until_staging = True
+            self.transition_to(VehicleLevelState.ARMING, 'waiting for staging setpoint')
+            self.logger.info(
+                f'{self.config.vehicle_id} received takeoff before staging setpoint; '
+                'waiting for staging target',
+            )
+            return
+        self._takeoff_to_staging_active = True
+        self._offboard_warmup_started_s = None
+        self._last_offboard_mode_request_s = None
+        # 先讓 PX4 自己管理起飛，保護 Offboard 不會在尚未離地時被太早拒絕。
         self.px4_interface.arm()
         self.px4_interface.takeoff(
             altitude_m=abs(self.active_setpoint.z),
@@ -102,11 +132,23 @@ class VehicleNodeCore:
         )
         self.transition_to(VehicleLevelState.TAKING_OFF, 'takeoff command accepted')
         self.logger.info(
-            '不依賴 QGC：起飛前先發布 Offboard heartbeat/setpoint，'
-            '再切換 Offboard、arm 並送出 takeoff command。',
+            '不依賴 QGC：先用 PX4 NAV_TAKEOFF 到安全高度，'
+            '再 warm up Offboard 後切換 staging control。',
         )
 
     def control_tick(self) -> None:
+        state = self.px4_interface.vehicle_state()
+        if self._state_is_landed(state):
+            self._takeoff_to_staging_active = False
+            self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
+            return
+        if self.vehicle_level_state is VehicleLevelState.LANDING:
+            # 降落期間不再送空中 staging setpoint，保護 PX4 landing mode 不被 ROS 2 搶控制權。
+            return
+        if self._takeoff_to_staging_active:
+            self._control_takeoff_to_staging(state)
+            return
+
         self.px4_interface.publish_offboard_heartbeat()
         if self.px4_interface.is_telemetry_stale():
             # telemetry 過期時只重送最後安全 setpoint，保護 vehicle 不追 stale command。
@@ -116,7 +158,55 @@ class VehicleNodeCore:
 
         # 每個 tick 都補 heartbeat/setpoint，保護 PX4 Offboard mode 不因間隔過久退出。
         self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
-        self.transition_to(VehicleLevelState.HOLDING, 'holding active setpoint')
+        next_state = (
+            VehicleLevelState.STAGING
+            if self.vehicle_level_state is VehicleLevelState.STAGING
+            else VehicleLevelState.HOLDING
+        )
+        self.transition_to(next_state, 'active setpoint published')
+
+    def _control_takeoff_to_staging(self, state) -> None:
+        if state is None or self.px4_interface.is_telemetry_stale():
+            return
+        if self._offboard_accepted(state):
+            self._takeoff_to_staging_active = False
+            self.px4_interface.publish_offboard_heartbeat()
+            self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
+            self.transition_to(VehicleLevelState.STAGING, 'PX4 accepted Offboard')
+            return
+        if not self._takeoff_altitude_reached(state):
+            return
+
+        # 高度達標後才連續送 heartbeat/setpoint，保護 PX4 Offboard 切換有足夠 warmup。
+        self.px4_interface.publish_offboard_heartbeat()
+        self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
+        now_s = self._now_s()
+        if self._offboard_warmup_started_s is None:
+            self._offboard_warmup_started_s = now_s
+            return
+        if now_s - self._offboard_warmup_started_s < self.config.offboard_warmup_s:
+            return
+        if (
+            self._last_offboard_mode_request_s is None
+            or now_s - self._last_offboard_mode_request_s
+            >= self.config.offboard_mode_retry_s
+        ):
+            self.px4_interface.set_offboard_mode()
+            self._last_offboard_mode_request_s = now_s
+
+    def _takeoff_altitude_reached(self, state) -> bool:
+        return state.position[2] <= (
+            self.active_setpoint.z + self.config.takeoff_altitude_tolerance_m
+        )
+
+    def _offboard_accepted(self, state) -> bool:
+        return state.offboard_available or state.navigation_state == 'offboard'
+
+    def _state_is_landed(self, state) -> bool:
+        return state is not None and (
+            getattr(state, 'landed', False)
+            or state.vehicle_level_state is VehicleLevelState.LANDED
+        )
 
     def publish_status(self) -> None:
         state = self.px4_interface.vehicle_state()
@@ -149,6 +239,10 @@ class VehicleNodeCore:
                     )
                     self._warned_mismatched_vehicle_state = True
                 return
+            status_vehicle_state = state.vehicle_level_state
+            if self._state_is_landed(state):
+                self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
+                status_vehicle_state = VehicleLevelState.LANDED
 
             msg.x, msg.y, msg.z = state.position
             msg.yaw = state.yaw
@@ -157,7 +251,7 @@ class VehicleNodeCore:
             msg.nav_state = state.navigation_state
             msg.offboard_available = state.offboard_available
             msg.last_telemetry_age_sec = state.telemetry_age_s
-            msg.vehicle_state = state.vehicle_level_state.value
+            msg.vehicle_state = status_vehicle_state.value
 
         self.status_publisher.publish(msg)
 
@@ -237,6 +331,9 @@ class VehicleNode(Node):
         self.declare_parameter('control_loop_hz', 20.0)
         self.declare_parameter('status_loop_hz', 5.0)
         self.declare_parameter('telemetry_timeout_s', 0.5)
+        self.declare_parameter('takeoff_altitude_tolerance_m', 1.0)
+        self.declare_parameter('offboard_warmup_s', 1.0)
+        self.declare_parameter('offboard_mode_retry_s', 1.0)
         self.declare_parameter('hold_x', 0.0)
         self.declare_parameter('hold_y', 0.0)
         self.declare_parameter('hold_z', -2.0)
@@ -252,6 +349,9 @@ class VehicleNode(Node):
             'control_loop_hz',
             'status_loop_hz',
             'telemetry_timeout_s',
+            'takeoff_altitude_tolerance_m',
+            'offboard_warmup_s',
+            'offboard_mode_retry_s',
             'hold_x',
             'hold_y',
             'hold_z',
@@ -266,6 +366,11 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
     control_loop_hz = float(values.get('control_loop_hz', 20.0))
     status_loop_hz = float(values.get('status_loop_hz', 5.0))
     telemetry_timeout_s = float(values.get('telemetry_timeout_s', 0.5))
+    takeoff_altitude_tolerance_m = float(
+        values.get('takeoff_altitude_tolerance_m', 1.0),
+    )
+    offboard_warmup_s = float(values.get('offboard_warmup_s', 1.0))
+    offboard_mode_retry_s = float(values.get('offboard_mode_retry_s', 1.0))
 
     if control_loop_hz <= 0.0:
         raise ValueError('control_loop_hz must be positive')
@@ -273,6 +378,12 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         raise ValueError('status_loop_hz must be positive')
     if telemetry_timeout_s <= 0.0:
         raise ValueError('telemetry_timeout_s must be positive')
+    if takeoff_altitude_tolerance_m <= 0.0:
+        raise ValueError('takeoff_altitude_tolerance_m must be positive')
+    if offboard_warmup_s <= 0.0:
+        raise ValueError('offboard_warmup_s must be positive')
+    if offboard_mode_retry_s <= 0.0:
+        raise ValueError('offboard_mode_retry_s must be positive')
 
     config = VehicleNodeConfig(
         role=role,
@@ -291,6 +402,9 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         control_loop_hz=control_loop_hz,
         status_loop_hz=status_loop_hz,
         telemetry_timeout_s=telemetry_timeout_s,
+        takeoff_altitude_tolerance_m=takeoff_altitude_tolerance_m,
+        offboard_warmup_s=offboard_warmup_s,
+        offboard_mode_retry_s=offboard_mode_retry_s,
     )
     _validate_first_version_mapping(config)
     return config

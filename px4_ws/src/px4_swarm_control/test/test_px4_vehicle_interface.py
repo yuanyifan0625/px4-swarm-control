@@ -5,6 +5,7 @@ from px4_msgs.msg import (
     TrajectorySetpoint,
     VehicleCommand,
     VehicleCommandAck,
+    VehicleLandDetected,
     VehicleLocalPosition,
     VehicleStatus,
 )
@@ -72,6 +73,7 @@ def test_interface_creates_vehicle_namespaced_px4_topics():
         '/vehicle_2/fmu/out/vehicle_local_position_v1',
         '/vehicle_2/fmu/out/vehicle_status_v4',
         '/vehicle_2/fmu/out/vehicle_command_ack_v1',
+        '/vehicle_2/fmu/out/vehicle_land_detected',
     ]
 
 
@@ -192,6 +194,29 @@ def test_vehicle_state_converts_latest_px4_telemetry_to_internal_model():
     assert state.offboard_available is True
     assert state.telemetry_age_s == 0.5
     assert state.vehicle_level_state is VehicleLevelState.IDLE
+    assert state.landed is False
+
+
+def test_vehicle_state_reports_landed_from_px4_land_detected_topic():
+    interface = make_interface(now_us=1_500_000)
+    local_position = VehicleLocalPosition()
+    local_position.timestamp = 1_400_000
+    local_position.z = -0.02
+
+    vehicle_status = VehicleStatus()
+    vehicle_status.arming_state = VehicleStatus.ARMING_STATE_DISARMED
+    vehicle_status.nav_state = VehicleStatus.NAVIGATION_STATE_AUTO_LAND
+
+    land_detected = VehicleLandDetected()
+    land_detected.landed = True
+
+    interface.handle_vehicle_local_position(local_position)
+    interface.handle_vehicle_status(vehicle_status)
+    interface.handle_vehicle_land_detected(land_detected)
+
+    state = interface.vehicle_state()
+    assert state.landed is True
+    assert state.vehicle_level_state is VehicleLevelState.LANDED
 
 
 def test_telemetry_is_stale_when_missing_or_older_than_timeout():

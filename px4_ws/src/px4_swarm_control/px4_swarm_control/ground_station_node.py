@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Callable, Dict
 
 from builtin_interfaces.msg import Time
@@ -42,6 +43,7 @@ class GroundStationConfig:
     staging_lateral_spacing_m: float = 4.0
     staging_trail_spacing_m: float = 3.0
     staging_position_tolerance_m: float = 0.5
+    telemetry_fresh_timeout_s: float = 1.0
     staging_yaw_rad: float = 0.0
 
 
@@ -272,10 +274,11 @@ class GroundStationCore:
         if len(self.vehicle_statuses) < self.config.total_vehicles:
             return False
         return all(
-            _position_close(
+            _staging_ready(
                 self.vehicle_statuses[vehicle_id],
                 target,
                 self.config.staging_position_tolerance_m,
+                self.config.telemetry_fresh_timeout_s,
             )
             for vehicle_id, target in self.staging_targets.items()
         )
@@ -386,6 +389,22 @@ def _position_close(
         abs(status.x - target.x) <= tolerance_m
         and abs(status.y - target.y) <= tolerance_m
         and abs(status.z - target.z) <= tolerance_m
+    )
+
+
+def _staging_ready(
+    status: VehicleStatus,
+    target: PositionYawSetpoint,
+    tolerance_m: float,
+    telemetry_fresh_timeout_s: float,
+) -> bool:
+    # staging 完成必須等 PX4 真正進入 Offboard，保護任務層不把可見 setpoint 誤當已受控。
+    return (
+        status.armed
+        and isfinite(status.last_telemetry_age_sec)
+        and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
+        and (status.offboard_available or status.nav_state == 'offboard')
+        and _position_close(status, target, tolerance_m)
     )
 
 

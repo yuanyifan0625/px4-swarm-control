@@ -10,10 +10,12 @@ from px4_msgs.msg import (
     TrajectorySetpoint,
     VehicleCommand,
     VehicleCommandAck,
+    VehicleLandDetected,
     VehicleLocalPosition,
     VehicleStatus as Px4VehicleStatus,
 )
 from px4_swarm_control.bridge_config import PX4_V118_OUT_TOPIC_SUFFIXES
+from px4_swarm_control.bridge_config import PX4_V118_LAND_DETECTED_TOPIC_SUFFIX
 from px4_swarm_control.models import (
     CommandStatus,
     PositionYawSetpoint,
@@ -47,6 +49,7 @@ class Px4VehicleInterface:
         self._last_setpoint: Optional[PositionYawSetpoint] = None
         self._latest_local_position: Optional[VehicleLocalPosition] = None
         self._latest_vehicle_status: Optional[Px4VehicleStatus] = None
+        self._latest_land_detected: Optional[VehicleLandDetected] = None
 
         qos_profile = _px4_qos_profile()
         self.offboard_control_mode_publisher = node.create_publisher(
@@ -83,6 +86,13 @@ class Px4VehicleInterface:
             # PX4 v1.18 會在部分 out topic 加版本尾綴，集中在邊界避免 controller 訂錯 topic。
             self._topic(PX4_V118_OUT_TOPIC_SUFFIXES[2]),
             self.handle_vehicle_command_ack,
+            qos_profile,
+        )
+        self.vehicle_land_detected_subscription = node.create_subscription(
+            VehicleLandDetected,
+            # landed telemetry 由 PX4 commander 判定，保護 ROS 2 不用猜測接地狀態。
+            self._topic(PX4_V118_LAND_DETECTED_TOPIC_SUFFIX),
+            self.handle_vehicle_land_detected,
             qos_profile,
         )
 
@@ -164,12 +174,22 @@ class Px4VehicleInterface:
             message=f'px4 command ack result={msg.result}',
         )
 
+    def handle_vehicle_land_detected(self, msg: VehicleLandDetected) -> None:
+        self._latest_land_detected = msg
+
     def vehicle_state(self) -> Optional[VehicleState]:
         if self._latest_local_position is None or self._latest_vehicle_status is None:
             return None
 
         local_position = self._latest_local_position
         vehicle_status = self._latest_vehicle_status
+        landed = (
+            self._latest_land_detected is not None
+            and bool(self._latest_land_detected.landed)
+        )
+        vehicle_level_state = (
+            VehicleLevelState.LANDED if landed else self.vehicle_level_state
+        )
         # PX4 telemetry 在邊界轉成 internal model，保護 controller 不依賴 raw px4_msgs 欄位。
         return VehicleState(
             vehicle_id=self.vehicle_id,
@@ -180,7 +200,8 @@ class Px4VehicleInterface:
             navigation_state=_navigation_state_name(vehicle_status.nav_state),
             offboard_available=vehicle_status.accepts_offboard_setpoints,
             telemetry_age_s=self._telemetry_age_s(),
-            vehicle_level_state=self.vehicle_level_state,
+            vehicle_level_state=vehicle_level_state,
+            landed=landed,
         )
 
     def is_telemetry_stale(self) -> bool:

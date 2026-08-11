@@ -120,10 +120,10 @@ ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
 - vehicle node terminal 會輸出中文說明：
 
 ```text
-不依賴 QGC：起飛前先發布 Offboard heartbeat/setpoint，再切換 Offboard、arm 並送出 takeoff command。
+不依賴 QGC：先用 PX4 NAV_TAKEOFF 到安全高度，再 warm up Offboard 後切換 staging control。
 ```
 
-- Gazebo 中三台飛機起飛，並往分開的 staging positions 移動：
+- Gazebo 中三台飛機先垂直起飛到安全高度，接著才切入 Offboard 並往分開的 staging positions 移動：
   - `vehicle_1` staging target 約為 `(0.0, 0.0, -5.0)`
   - `vehicle_2` staging target 約為 `(-3.0, 4.0, -5.0)`
   - `vehicle_3` staging target 約為 `(-3.0, -4.0, -5.0)`
@@ -133,7 +133,7 @@ ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
 all vehicles reached staging positions
 ```
 
-## Terminal 6：觀察 status
+## Terminal 6：觀察 takeoff、Offboard、staging status
 
 ```bash
 ros2 topic echo --once /vehicle_1/status
@@ -145,7 +145,14 @@ ros2 topic echo --once /vehicle_3/status
 
 - 三台 status 都有有限的 `x/y/z/yaw`，不是 `nan`
 - `armed: true`
-- `vehicle_state` 至少進入 `taking_off`、`staging` 或 `holding`
+- 起飛初期三台先到安全高度，例如 `altitude_m: 5.0` 時 `z < -4.0`
+- staging 完成前，三台都要看到 `nav_state: offboard` 或 `offboard_available: true`
+- staging 完成後，三台 `vehicle_state` 會進入 `staging`
+- staging 完成後位置應接近：
+  - `vehicle_1`: `x ~= 0.0`, `y ~= 0.0`, `z ~= -5.0`
+  - `vehicle_2`: `x ~= -3.0`, `y ~= 4.0`, `z ~= -5.0`
+  - `vehicle_3`: `x ~= -3.0`, `y ~= -4.0`, `z ~= -5.0`
+- ground station 只有在三台都有 telemetry、armed、Offboard ready、且位置到 tolerance 內時，才會輸出 `all vehicles reached staging positions`
 
 ## Terminal 6：送出 LandSwarm
 
@@ -160,7 +167,31 @@ ros2 action send_goal /swarm/land px4_swarm_interfaces/action/LandSwarm \
 - feedback 顯示 `current_state: landing`
 - result 顯示 `success: true`
 - Gazebo 中三台飛機開始降落
-- 三台 vehicle status 最後進入 landing/landed 相關狀態
+- 送出 land 後，三台 `/vehicle_N/status` 的 `vehicle_state` 應保持 `landing`，不能被一般 control tick 改回 `holding`
+- 三台最後必須透過 PX4 landed telemetry 進入 `vehicle_state: landed`
+- ground station terminal 最後會輸出類似：
+
+```text
+swarm mission landing -> done: all vehicles reported landed
+```
+
+可用下列指令重複觀察：
+
+```bash
+ros2 topic echo --once /vehicle_1/status
+ros2 topic echo --once /vehicle_2/status
+ros2 topic echo --once /vehicle_3/status
+```
+
+如果想確認 land 後 vehicle node 沒有繼續發空中 staging setpoint，可以在送出 LandSwarm 後另開 terminal 觀察：
+
+```bash
+ros2 topic hz /vehicle_1/fmu/in/trajectory_setpoint --window 10
+ros2 topic hz /vehicle_2/fmu/in/trajectory_setpoint --window 10
+ros2 topic hz /vehicle_3/fmu/in/trajectory_setpoint --window 10
+```
+
+通過條件：進入 `landing` 後不應再看到持續的 20 Hz staging setpoint；三台最後在 Gazebo 地面穩定停住並回報 `landed`。
 
 ## 如果未開 QGC 起飛失敗
 
