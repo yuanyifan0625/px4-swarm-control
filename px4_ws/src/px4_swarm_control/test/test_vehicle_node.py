@@ -12,7 +12,7 @@ from px4_swarm_control.vehicle_node import (
     VehicleNodeConfig,
     VehicleNodeCore,
 )
-from px4_swarm_interfaces.msg import LeaderGoal
+from px4_swarm_interfaces.msg import LeaderGoal, MissionCommand, VehicleSetpoint
 
 
 class FakePublisher:
@@ -42,6 +42,10 @@ class FakePx4Interface:
         self.heartbeats = 0
         self.setpoints = []
         self.safe_hover_calls = 0
+        self.offboard_mode_calls = 0
+        self.arm_calls = 0
+        self.takeoff_altitudes = []
+        self.land_calls = 0
 
     def publish_offboard_heartbeat(self):
         self.heartbeats += 1
@@ -52,6 +56,18 @@ class FakePx4Interface:
     def publish_safe_hover_setpoint(self):
         self.safe_hover_calls += 1
         return True
+
+    def set_offboard_mode(self):
+        self.offboard_mode_calls += 1
+
+    def arm(self):
+        self.arm_calls += 1
+
+    def takeoff(self, altitude_m, yaw=0.0):
+        self.takeoff_altitudes.append((altitude_m, yaw))
+
+    def land(self):
+        self.land_calls += 1
 
     def vehicle_state(self):
         return self.state
@@ -195,6 +211,61 @@ def test_control_tick_uses_safe_hover_when_telemetry_is_stale():
     assert px4_interface.setpoints == []
     assert px4_interface.safe_hover_calls == 1
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
+
+
+def test_vehicle_staging_setpoint_and_takeoff_command_warm_up_offboard_without_qgc():
+    px4_interface = FakePx4Interface()
+    logger = FakeLogger()
+    core = make_core(px4_interface=px4_interface, logger=logger)
+    setpoint = VehicleSetpoint()
+    setpoint.vehicle_id = 1
+    setpoint.x = 0.0
+    setpoint.y = 0.0
+    setpoint.z = -5.0
+    setpoint.yaw = 0.25
+    mission = MissionCommand()
+    mission.command = MissionCommand.TAKEOFF
+
+    core.handle_staging_setpoint(setpoint)
+    core.handle_mission_command(mission)
+
+    assert core.active_setpoint == PositionYawSetpoint(0.0, 0.0, -5.0, 0.25)
+    assert px4_interface.heartbeats == 1
+    assert px4_interface.setpoints == [PositionYawSetpoint(0.0, 0.0, -5.0, 0.25)]
+    assert px4_interface.offboard_mode_calls == 1
+    assert px4_interface.arm_calls == 1
+    assert px4_interface.takeoff_altitudes == [(5.0, 0.25)]
+    assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
+    assert logger.infos[-1] == (
+        '不依賴 QGC：起飛前先發布 Offboard heartbeat/setpoint，'
+        '再切換 Offboard、arm 並送出 takeoff command。'
+    )
+
+
+def test_vehicle_ignores_staging_setpoint_for_another_vehicle():
+    core = make_core()
+    setpoint = VehicleSetpoint()
+    setpoint.vehicle_id = 2
+    setpoint.x = 9.0
+    setpoint.y = 9.0
+    setpoint.z = -9.0
+    setpoint.yaw = 1.0
+
+    core.handle_staging_setpoint(setpoint)
+
+    assert core.active_setpoint == core.config.hold_setpoint
+
+
+def test_land_mission_command_calls_px4_land_and_updates_state():
+    px4_interface = FakePx4Interface()
+    core = make_core(px4_interface=px4_interface)
+    mission = MissionCommand()
+    mission.command = MissionCommand.LAND
+
+    core.handle_mission_command(mission)
+
+    assert px4_interface.land_calls == 1
+    assert core.vehicle_level_state is VehicleLevelState.LANDING
 
 
 def test_publish_status_uses_internal_vehicle_state_when_available():

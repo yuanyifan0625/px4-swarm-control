@@ -19,6 +19,8 @@ from px4_swarm_control.models import (
 )
 from px4_swarm_control.px4_vehicle_interface import Px4VehicleInterface
 from px4_swarm_interfaces.msg import LeaderGoal
+from px4_swarm_interfaces.msg import MissionCommand
+from px4_swarm_interfaces.msg import VehicleSetpoint
 from px4_swarm_interfaces.msg import VehicleStatus as SwarmVehicleStatus
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -65,6 +67,44 @@ class VehicleNodeCore:
 
         self.active_setpoint = PositionYawSetpoint(msg.x, msg.y, msg.z, msg.yaw)
         self.transition_to(VehicleLevelState.HOLDING, 'leader goal accepted')
+
+    def handle_staging_setpoint(self, msg: VehicleSetpoint) -> None:
+        if int(msg.vehicle_id) != vehicle_id_to_uint8(self.config.vehicle_id):
+            return
+        # 只接受自己的 staging 目標，保護多機共用 topic 流程下不追錯飛機位置。
+        self.active_setpoint = PositionYawSetpoint(msg.x, msg.y, msg.z, msg.yaw)
+        self.transition_to(VehicleLevelState.STAGING, 'staging setpoint accepted')
+
+    def handle_mission_command(self, msg: MissionCommand) -> None:
+        if msg.command == MissionCommand.TAKEOFF:
+            self._start_takeoff_without_qgc()
+            return
+        if msg.command == MissionCommand.LAND:
+            self.px4_interface.land()
+            self.transition_to(VehicleLevelState.LANDING, 'land command accepted')
+            return
+        if msg.command == MissionCommand.PAUSE:
+            self.transition_to(VehicleLevelState.PAUSED, 'pause command accepted')
+            self.px4_interface.publish_safe_hover_setpoint()
+            return
+        if msg.command == MissionCommand.RESUME:
+            self.transition_to(VehicleLevelState.HOLDING, 'resume command accepted')
+
+    def _start_takeoff_without_qgc(self) -> None:
+        # 起飛前先 warm up Offboard 訊號，保護 SITL 不需要 QGC 才能 arm/takeoff。
+        self.px4_interface.publish_offboard_heartbeat()
+        self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
+        self.px4_interface.set_offboard_mode()
+        self.px4_interface.arm()
+        self.px4_interface.takeoff(
+            altitude_m=abs(self.active_setpoint.z),
+            yaw=self.active_setpoint.yaw,
+        )
+        self.transition_to(VehicleLevelState.TAKING_OFF, 'takeoff command accepted')
+        self.logger.info(
+            '不依賴 QGC：起飛前先發布 Offboard heartbeat/setpoint，'
+            '再切換 Offboard、arm 並送出 takeoff command。',
+        )
 
     def control_tick(self) -> None:
         self.px4_interface.publish_offboard_heartbeat()
@@ -165,6 +205,18 @@ class VehicleNode(Node):
             LeaderGoal,
             '/swarm/leader_goal',
             self.core.handle_leader_goal,
+            10,
+        )
+        self.mission_command_subscription = self.create_subscription(
+            MissionCommand,
+            '/swarm/mission_command',
+            self.core.handle_mission_command,
+            10,
+        )
+        self.staging_setpoint_subscription = self.create_subscription(
+            VehicleSetpoint,
+            f'{self.config.px4_namespace}/staging_setpoint',
+            self.core.handle_staging_setpoint,
             10,
         )
         self.control_timer = self.create_timer(

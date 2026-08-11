@@ -23,6 +23,7 @@ def test_package_exposes_initial_contract_names():
         "FormationMode",
         "MissionCommand",
         "FailsafeCommand",
+        "VehicleSetpoint",
         "VehicleStatus",
     )
 

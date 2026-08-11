@@ -7,8 +7,10 @@ from typing import Callable, Dict
 
 from builtin_interfaces.msg import Time
 from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES
+from px4_swarm_control.geometry import FormationGeometry, staging_setpoint
 from px4_swarm_control.models import FormationMode as InternalFormationMode
 from px4_swarm_control.models import MissionState
+from px4_swarm_control.models import PositionYawSetpoint
 from px4_swarm_control.models import VehicleLevelState
 from px4_swarm_interfaces.action import (
     ChangeFormation,
@@ -22,6 +24,7 @@ from px4_swarm_interfaces.msg import (
     FormationMode,
     LeaderGoal,
     MissionCommand,
+    VehicleSetpoint,
     VehicleStatus,
 )
 import rclpy
@@ -36,6 +39,10 @@ class GroundStationConfig:
 
     total_vehicles: int = 3
     active_formation: str = InternalFormationMode.VEE.value
+    staging_lateral_spacing_m: float = 4.0
+    staging_trail_spacing_m: float = 3.0
+    staging_position_tolerance_m: float = 0.5
+    staging_yaw_rad: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -46,6 +53,7 @@ class GroundStationPublishers:
     leader_goal: object
     formation_mode: object
     failsafe_command: object
+    vehicle_setpoints: Dict[int, object]
 
 
 @dataclass(frozen=True)
@@ -73,9 +81,12 @@ class GroundStationCore:
         self.mission_state = MissionState.IDLE
         self.active_formation = config.active_formation
         self.vehicle_statuses: Dict[int, VehicleStatus] = {}
+        self.staging_targets: Dict[int, PositionYawSetpoint] = {}
+        self._staging_complete_logged = False
 
     def handle_takeoff(self, request: TakeoffSwarm.Goal):
         self._transition_to(MissionState.TAKING_OFF, 'takeoff action accepted')
+        self._publish_staging_setpoints(request.altitude_m)
         mission = self._mission_command(
             MissionCommand.TAKEOFF,
             f'altitude_m={request.altitude_m:.2f} timeout_sec={request.timeout_sec:.2f}',
@@ -195,6 +206,13 @@ class GroundStationCore:
         if self._all_known_vehicles_in_state(VehicleLevelState.LANDED.value):
             # 全隊 landed 才把任務收斂到 done，避免單機降落時誤判整隊完成。
             self._transition_to(MissionState.DONE, 'all vehicles reported landed')
+            return
+        if self.mission_state is MissionState.TAKING_OFF and self._all_vehicles_staged():
+            # 三台都在 staging tolerance 內才宣布完成，保護起飛集結不因單機先到而提前進入下一階段。
+            self._transition_to(MissionState.STAGING, 'all vehicles staged')
+            if not self._staging_complete_logged:
+                self.logger.info('all vehicles reached staging positions')
+                self._staging_complete_logged = True
 
     def _mission_command(self, command: str, reason: str) -> MissionCommand:
         msg = MissionCommand()
@@ -220,6 +238,48 @@ class GroundStationCore:
             for status in self.vehicle_statuses.values()
         )
 
+    def _publish_staging_setpoints(self, altitude_m: float) -> None:
+        # 起飛 staging 固定用 world frame，保護三機在離地前後維持水平安全間距。
+        geometry = FormationGeometry(
+            lateral_spacing_m=self.config.staging_lateral_spacing_m,
+            trail_spacing_m=self.config.staging_trail_spacing_m,
+        )
+        leader = PositionYawSetpoint(
+            x=0.0,
+            y=0.0,
+            z=-abs(float(altitude_m)),
+            yaw=self.config.staging_yaw_rad,
+        )
+        self.staging_targets = {}
+        self._staging_complete_logged = False
+        for vehicle in FIRST_VERSION_VEHICLES:
+            # 由 ground station 只分派目標位置，保護每台 vehicle node 仍只控制自己的 PX4。
+            target = staging_setpoint(leader, vehicle.slot, geometry)
+            self.staging_targets[vehicle.px4_instance] = target
+            msg = VehicleSetpoint()
+            msg.stamp = self.now_stamp()
+            msg.vehicle_id = vehicle.px4_instance
+            msg.frame_id = 'world'
+            msg.x = target.x
+            msg.y = target.y
+            msg.z = target.z
+            msg.yaw = target.yaw
+            self.publishers.vehicle_setpoints[vehicle.px4_instance].publish(msg)
+
+    def _all_vehicles_staged(self) -> bool:
+        if len(self.staging_targets) < self.config.total_vehicles:
+            return False
+        if len(self.vehicle_statuses) < self.config.total_vehicles:
+            return False
+        return all(
+            _position_close(
+                self.vehicle_statuses[vehicle_id],
+                target,
+                self.config.staging_position_tolerance_m,
+            )
+            for vehicle_id, target in self.staging_targets.items()
+        )
+
 
 class GroundStationNode(Node):
     """ROS 2 node exposing operator actions under `/swarm`."""
@@ -236,6 +296,14 @@ class GroundStationNode(Node):
                 'failsafe_command',
                 10,
             ),
+            vehicle_setpoints={
+                vehicle.px4_instance: self.create_publisher(
+                    VehicleSetpoint,
+                    f'{vehicle.namespace}/staging_setpoint',
+                    10,
+                )
+                for vehicle in FIRST_VERSION_VEHICLES
+            },
         )
         self.core = GroundStationCore(
             self.config,
@@ -307,6 +375,18 @@ def default_ground_station_config() -> GroundStationConfig:
 
 def _supported_formation_modes() -> set[str]:
     return {mode.value for mode in InternalFormationMode}
+
+
+def _position_close(
+    status: VehicleStatus,
+    target: PositionYawSetpoint,
+    tolerance_m: float,
+) -> bool:
+    return (
+        abs(status.x - target.x) <= tolerance_m
+        and abs(status.y - target.y) <= tolerance_m
+        and abs(status.z - target.z) <= tolerance_m
+    )
 
 
 def main(args=None) -> None:

@@ -13,6 +13,7 @@ EXPECTED_MESSAGES = (
     "FormationMode",
     "MissionCommand",
     "FailsafeCommand",
+    "VehicleSetpoint",
     "VehicleStatus",
 )
 

@@ -19,6 +19,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/FormationMode.msg"
   "msg/LeaderGoal.msg"
   "msg/MissionCommand.msg"
+  "msg/VehicleSetpoint.msg"
   "msg/VehicleStatus.msg"
   DEPENDENCIES builtin_interfaces
 )
