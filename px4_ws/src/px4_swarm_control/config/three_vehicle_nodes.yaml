@@ -1,0 +1,42 @@
+# First-version fixed role/namespace/slot layout for manual ticket 05 checks.
+vehicle_1:
+  ros__parameters:
+    role: leader
+    vehicle_id: vehicle_1
+    px4_namespace: /vehicle_1
+    slot: leader
+    control_loop_hz: 20.0
+    status_loop_hz: 5.0
+    telemetry_timeout_s: 0.5
+    hold_x: 0.0
+    hold_y: 0.0
+    hold_z: -2.0
+    hold_yaw: 0.0
+
+vehicle_2:
+  ros__parameters:
+    role: follower
+    vehicle_id: vehicle_2
+    px4_namespace: /vehicle_2
+    slot: follower_left
+    control_loop_hz: 20.0
+    status_loop_hz: 5.0
+    telemetry_timeout_s: 0.5
+    hold_x: 0.0
+    hold_y: 0.0
+    hold_z: -2.0
+    hold_yaw: 0.0
+
+vehicle_3:
+  ros__parameters:
+    role: follower
+    vehicle_id: vehicle_3
+    px4_namespace: /vehicle_3
+    slot: follower_right
+    control_loop_hz: 20.0
+    status_loop_hz: 5.0
+    telemetry_timeout_s: 0.5
+    hold_x: 0.0
+    hold_y: 0.0
+    hold_z: -2.0
+    hold_yaw: 0.0

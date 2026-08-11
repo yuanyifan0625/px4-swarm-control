@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import nan
 from re import search
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from px4_swarm_control.models import (
     PositionYawSetpoint,
@@ -46,6 +46,7 @@ class VehicleNodeCore:
         self.vehicle_level_state = VehicleLevelState.IDLE
         self.active_setpoint = config.hold_setpoint
         self._warned_ignored_leader_goal = False
+        self._warned_mismatched_vehicle_state = False
         self._sync_interface_state()
 
     def handle_leader_goal(self, msg: LeaderGoal) -> None:
@@ -94,6 +95,16 @@ class VehicleNodeCore:
             msg.last_telemetry_age_sec = float('inf')
             msg.vehicle_state = self.vehicle_level_state.value
         else:
+            # 丟棄 vehicle_id 不一致的 telemetry，保護 status topic 不混入其他飛機資料。
+            if state.vehicle_id != self.config.vehicle_id:
+                if not self._warned_mismatched_vehicle_state:
+                    self.logger.warning(
+                        f'{self.config.vehicle_id} ignored telemetry for '
+                        f'{state.vehicle_id} from {self.config.px4_namespace}',
+                    )
+                    self._warned_mismatched_vehicle_state = True
+                return
+
             msg.x, msg.y, msg.z = state.position
             msg.yaw = state.yaw
             msg.vx, msg.vy, msg.vz = state.velocity
@@ -203,7 +214,7 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
     if telemetry_timeout_s <= 0.0:
         raise ValueError('telemetry_timeout_s must be positive')
 
-    return VehicleNodeConfig(
+    config = VehicleNodeConfig(
         role=role,
         vehicle_id=str(values.get('vehicle_id', 'vehicle_1')),
         px4_namespace=_normalize_namespace(str(values.get('px4_namespace', '/vehicle_1'))),
@@ -217,6 +228,42 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         control_loop_hz=control_loop_hz,
         status_loop_hz=status_loop_hz,
         telemetry_timeout_s=telemetry_timeout_s,
+    )
+    _validate_first_version_mapping(config)
+    return config
+
+
+def default_vehicle_node_configs() -> Tuple[
+    VehicleNodeConfig,
+    VehicleNodeConfig,
+    VehicleNodeConfig,
+]:
+    """Return the first-version three-node layout used for manual namespace validation."""
+    return (
+        parse_vehicle_node_config(
+            {
+                'role': 'leader',
+                'vehicle_id': 'vehicle_1',
+                'px4_namespace': '/vehicle_1',
+                'slot': 'leader',
+            },
+        ),
+        parse_vehicle_node_config(
+            {
+                'role': 'follower',
+                'vehicle_id': 'vehicle_2',
+                'px4_namespace': '/vehicle_2',
+                'slot': 'follower_left',
+            },
+        ),
+        parse_vehicle_node_config(
+            {
+                'role': 'follower',
+                'vehicle_id': 'vehicle_3',
+                'px4_namespace': '/vehicle_3',
+                'slot': 'follower_right',
+            },
+        ),
     )
 
 
@@ -256,6 +303,28 @@ def _normalize_namespace(namespace: str) -> str:
     if not stripped:
         return ''
     return f'/{stripped}'
+
+
+def _validate_first_version_mapping(config: VehicleNodeConfig) -> None:
+    expected = {
+        'vehicle_1': ('/vehicle_1', VehicleRole.LEADER, Slot.LEADER),
+        'vehicle_2': ('/vehicle_2', VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
+        'vehicle_3': ('/vehicle_3', VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
+    }
+    if config.vehicle_id not in expected:
+        raise ValueError(f'vehicle_id must be one of: {", ".join(expected)}')
+
+    expected_namespace, expected_role, expected_slot = expected[config.vehicle_id]
+    if (
+        config.px4_namespace != expected_namespace
+        or config.role is not expected_role
+        or config.slot is not expected_slot
+    ):
+        # 固定 vehicle_id/namespace/slot 對應，保護三機 telemetry 不被錯接到別台狀態 topic。
+        raise ValueError(
+            f'{config.vehicle_id} must map to '
+            f'{expected_namespace}, {expected_role.value}, {expected_slot.value}',
+        )
 
 
 if __name__ == '__main__':

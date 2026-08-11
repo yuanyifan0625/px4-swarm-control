@@ -6,6 +6,7 @@ from px4_swarm_control.models import (
     VehicleState,
 )
 from px4_swarm_control.vehicle_node import (
+    default_vehicle_node_configs,
     parse_vehicle_node_config,
     vehicle_id_to_uint8,
     VehicleNodeConfig,
@@ -103,6 +104,29 @@ def test_parse_vehicle_node_config_rejects_invalid_role_slot_and_rate():
         raise AssertionError(f'expected ValueError for {values}')
 
 
+def test_parse_vehicle_node_config_rejects_swapped_vehicle_namespace_mapping():
+    for values in (
+        {'vehicle_id': 'vehicle_2', 'px4_namespace': '/vehicle_3', 'slot': 'follower_left'},
+        {'vehicle_id': 'vehicle_2', 'px4_namespace': '/vehicle_2', 'slot': 'follower_right'},
+        {'vehicle_id': 'vehicle_3', 'px4_namespace': '/vehicle_3', 'role': 'leader'},
+    ):
+        try:
+            parse_vehicle_node_config(values)
+        except ValueError:
+            continue
+        raise AssertionError(f'expected ValueError for {values}')
+
+
+def test_default_vehicle_node_configs_match_first_version_three_vehicle_layout():
+    configs = default_vehicle_node_configs()
+
+    assert [(config.vehicle_id, config.px4_namespace, config.role, config.slot) for config in configs] == [
+        ('vehicle_1', '/vehicle_1', VehicleRole.LEADER, Slot.LEADER),
+        ('vehicle_2', '/vehicle_2', VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
+        ('vehicle_3', '/vehicle_3', VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
+    ]
+
+
 def test_leader_goal_updates_only_leader_setpoint():
     leader_core = make_core(
         VehicleNodeConfig(
@@ -198,6 +222,41 @@ def test_publish_status_uses_internal_vehicle_state_when_available():
     assert msg.offboard_available is True
     assert msg.last_telemetry_age_sec == 0.25
     assert msg.vehicle_state == 'following'
+
+
+def test_publish_status_drops_mismatched_interface_vehicle_state():
+    state = VehicleState(
+        vehicle_id='vehicle_3',
+        position=(9.0, 8.0, -7.0),
+        yaw=0.4,
+        velocity=(0.1, 0.2, -0.3),
+        armed=True,
+        navigation_state='offboard',
+        offboard_available=True,
+        telemetry_age_s=0.25,
+        vehicle_level_state=VehicleLevelState.FOLLOWING,
+    )
+    status_publisher = FakePublisher()
+    logger = FakeLogger()
+    core = make_core(
+        config=VehicleNodeConfig(
+            role=VehicleRole.FOLLOWER,
+            vehicle_id='vehicle_2',
+            px4_namespace='/vehicle_2',
+            slot=Slot.FOLLOWER_LEFT,
+            hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
+        ),
+        px4_interface=FakePx4Interface(state=state),
+        status_publisher=status_publisher,
+        logger=logger,
+    )
+
+    core.publish_status()
+
+    assert status_publisher.messages == []
+    assert logger.warnings == [
+        'vehicle_2 ignored telemetry for vehicle_3 from /vehicle_2',
+    ]
 
 
 def test_state_transition_logging_is_not_repeated_for_same_state():
