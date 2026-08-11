@@ -47,11 +47,12 @@ class FakeNode:
         return self.now_us
 
 
-def make_interface(now_us=123456, namespace='/vehicle_2'):
+def make_interface(now_us=123456, namespace='/vehicle_2', px4_target_system=3):
     return Px4VehicleInterface(
         node=FakeNode(now_us=now_us),
         vehicle_id='vehicle_2',
         px4_namespace=namespace,
+        px4_target_system=px4_target_system,
         telemetry_timeout_s=0.5,
     )
 
@@ -68,9 +69,9 @@ def test_interface_creates_vehicle_namespaced_px4_topics():
         '/vehicle_2/fmu/in/vehicle_command',
     ]
     assert subscriber_topics == [
-        '/vehicle_2/fmu/out/vehicle_local_position',
-        '/vehicle_2/fmu/out/vehicle_status',
-        '/vehicle_2/fmu/out/vehicle_command_ack',
+        '/vehicle_2/fmu/out/vehicle_local_position_v1',
+        '/vehicle_2/fmu/out/vehicle_status_v4',
+        '/vehicle_2/fmu/out/vehicle_command_ack_v1',
     ]
 
 
@@ -134,6 +135,16 @@ def test_vehicle_commands_include_expected_command_ids_and_params():
     assert commands[4].param2 == 6.0
     assert all(msg.from_external for msg in commands)
     assert all(msg.timestamp == 4000 for msg in commands)
+    assert all(msg.target_system == 3 for msg in commands)
+
+
+def test_vehicle_command_target_system_can_be_broadcast_for_smoke_testing():
+    interface = make_interface(now_us=4000, px4_target_system=0)
+
+    interface.land()
+
+    msg = interface.vehicle_command_publisher.messages[-1]
+    assert msg.target_system == 0
 
 
 def test_safe_hover_republishes_last_setpoint_when_available():

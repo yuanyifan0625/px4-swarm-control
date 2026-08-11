@@ -85,9 +85,11 @@ def test_parse_vehicle_node_config_accepts_leader_and_follower_values():
 
     assert leader.role is VehicleRole.LEADER
     assert leader.slot is Slot.LEADER
+    assert leader.px4_target_system == 2
     assert leader.hold_setpoint == PositionYawSetpoint(1.0, 2.0, -3.0, 0.5)
     assert follower.role is VehicleRole.FOLLOWER
     assert follower.px4_namespace == '/vehicle_2'
+    assert follower.px4_target_system == 3
     assert follower.slot is Slot.FOLLOWER_LEFT
 
 
@@ -108,6 +110,7 @@ def test_parse_vehicle_node_config_rejects_swapped_vehicle_namespace_mapping():
     for values in (
         {'vehicle_id': 'vehicle_2', 'px4_namespace': '/vehicle_3', 'slot': 'follower_left'},
         {'vehicle_id': 'vehicle_2', 'px4_namespace': '/vehicle_2', 'slot': 'follower_right'},
+        {'vehicle_id': 'vehicle_2', 'px4_namespace': '/vehicle_2', 'px4_target_system': 4, 'slot': 'follower_left'},
         {'vehicle_id': 'vehicle_3', 'px4_namespace': '/vehicle_3', 'role': 'leader'},
     ):
         try:
@@ -120,10 +123,19 @@ def test_parse_vehicle_node_config_rejects_swapped_vehicle_namespace_mapping():
 def test_default_vehicle_node_configs_match_first_version_three_vehicle_layout():
     configs = default_vehicle_node_configs()
 
-    assert [(config.vehicle_id, config.px4_namespace, config.role, config.slot) for config in configs] == [
-        ('vehicle_1', '/vehicle_1', VehicleRole.LEADER, Slot.LEADER),
-        ('vehicle_2', '/vehicle_2', VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
-        ('vehicle_3', '/vehicle_3', VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
+    assert [
+        (
+            config.vehicle_id,
+            config.px4_namespace,
+            config.px4_target_system,
+            config.role,
+            config.slot,
+        )
+        for config in configs
+    ] == [
+        ('vehicle_1', '/vehicle_1', 2, VehicleRole.LEADER, Slot.LEADER),
+        ('vehicle_2', '/vehicle_2', 3, VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
+        ('vehicle_3', '/vehicle_3', 4, VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
     ]
 
 
@@ -133,6 +145,7 @@ def test_leader_goal_updates_only_leader_setpoint():
             role=VehicleRole.LEADER,
             vehicle_id='vehicle_1',
             px4_namespace='/vehicle_1',
+            px4_target_system=2,
             slot=Slot.LEADER,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
         ),
@@ -142,6 +155,7 @@ def test_leader_goal_updates_only_leader_setpoint():
             role=VehicleRole.FOLLOWER,
             vehicle_id='vehicle_2',
             px4_namespace='/vehicle_2',
+            px4_target_system=3,
             slot=Slot.FOLLOWER_LEFT,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
         ),
@@ -201,6 +215,7 @@ def test_publish_status_uses_internal_vehicle_state_when_available():
             role=VehicleRole.FOLLOWER,
             vehicle_id='vehicle_2',
             px4_namespace='/vehicle_2',
+            px4_target_system=3,
             slot=Slot.FOLLOWER_LEFT,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
         ),
@@ -243,6 +258,7 @@ def test_publish_status_drops_mismatched_interface_vehicle_state():
             role=VehicleRole.FOLLOWER,
             vehicle_id='vehicle_2',
             px4_namespace='/vehicle_2',
+            px4_target_system=3,
             slot=Slot.FOLLOWER_LEFT,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
         ),
@@ -281,6 +297,7 @@ def make_core(config=None, px4_interface=None, status_publisher=None, logger=Non
             role=VehicleRole.LEADER,
             vehicle_id='vehicle_1',
             px4_namespace='/vehicle_1',
+            px4_target_system=2,
             slot=Slot.LEADER,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
         )

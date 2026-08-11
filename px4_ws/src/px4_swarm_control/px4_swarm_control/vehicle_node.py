@@ -7,6 +7,10 @@ from math import nan
 from re import search
 from typing import Any, Dict, Tuple
 
+from px4_swarm_control.bridge_config import (
+    FIRST_VERSION_BY_VEHICLE_ID,
+    FIRST_VERSION_VEHICLES,
+)
 from px4_swarm_control.models import (
     PositionYawSetpoint,
     Slot,
@@ -28,6 +32,7 @@ class VehicleNodeConfig:
     role: VehicleRole
     vehicle_id: str
     px4_namespace: str
+    px4_target_system: int
     slot: Slot
     hold_setpoint: PositionYawSetpoint
     control_loop_hz: float = 20.0
@@ -142,6 +147,7 @@ class VehicleNode(Node):
             node=self,
             vehicle_id=self.config.vehicle_id,
             px4_namespace=self.config.px4_namespace,
+            px4_target_system=self.config.px4_target_system,
             telemetry_timeout_s=self.config.telemetry_timeout_s,
         )
         self.status_publisher = self.create_publisher(
@@ -174,6 +180,7 @@ class VehicleNode(Node):
         self.declare_parameter('role', 'leader')
         self.declare_parameter('vehicle_id', 'vehicle_1')
         self.declare_parameter('px4_namespace', '/vehicle_1')
+        self.declare_parameter('px4_target_system', 2)
         self.declare_parameter('slot', 'leader')
         self.declare_parameter('control_loop_hz', 20.0)
         self.declare_parameter('status_loop_hz', 5.0)
@@ -188,6 +195,7 @@ class VehicleNode(Node):
             'role',
             'vehicle_id',
             'px4_namespace',
+            'px4_target_system',
             'slot',
             'control_loop_hz',
             'status_loop_hz',
@@ -217,7 +225,10 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
     config = VehicleNodeConfig(
         role=role,
         vehicle_id=str(values.get('vehicle_id', 'vehicle_1')),
-        px4_namespace=_normalize_namespace(str(values.get('px4_namespace', '/vehicle_1'))),
+        px4_namespace=_normalize_namespace(
+            str(values.get('px4_namespace', '/vehicle_1')),
+        ),
+        px4_target_system=_target_system_for_values(values),
         slot=slot,
         hold_setpoint=PositionYawSetpoint(
             float(values.get('hold_x', 0.0)),
@@ -245,6 +256,7 @@ def default_vehicle_node_configs() -> Tuple[
                 'role': 'leader',
                 'vehicle_id': 'vehicle_1',
                 'px4_namespace': '/vehicle_1',
+                'px4_target_system': 2,
                 'slot': 'leader',
             },
         ),
@@ -253,6 +265,7 @@ def default_vehicle_node_configs() -> Tuple[
                 'role': 'follower',
                 'vehicle_id': 'vehicle_2',
                 'px4_namespace': '/vehicle_2',
+                'px4_target_system': 3,
                 'slot': 'follower_left',
             },
         ),
@@ -261,6 +274,7 @@ def default_vehicle_node_configs() -> Tuple[
                 'role': 'follower',
                 'vehicle_id': 'vehicle_3',
                 'px4_namespace': '/vehicle_3',
+                'px4_target_system': 4,
                 'slot': 'follower_right',
             },
         ),
@@ -275,6 +289,19 @@ def vehicle_id_to_uint8(vehicle_id: str) -> int:
     if value < 0 or value > 255:
         raise ValueError(f'vehicle_id must fit uint8: {vehicle_id}')
     return value
+
+
+def _target_system_for_values(values: Dict[str, Any]) -> int:
+    if 'px4_target_system' in values:
+        target_system = int(values['px4_target_system'])
+    else:
+        expectation = FIRST_VERSION_BY_VEHICLE_ID.get(
+            str(values.get('vehicle_id', 'vehicle_1')),
+        )
+        target_system = expectation.px4_target_system if expectation else -1
+    if target_system < 0 or target_system > 255:
+        raise ValueError('px4_target_system must fit uint8, or 0 for broadcast')
+    return target_system
 
 
 def main(args=None) -> None:
@@ -307,23 +334,31 @@ def _normalize_namespace(namespace: str) -> str:
 
 def _validate_first_version_mapping(config: VehicleNodeConfig) -> None:
     expected = {
-        'vehicle_1': ('/vehicle_1', VehicleRole.LEADER, Slot.LEADER),
-        'vehicle_2': ('/vehicle_2', VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
-        'vehicle_3': ('/vehicle_3', VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
+        vehicle.vehicle_id: (
+            vehicle.namespace,
+            vehicle.px4_target_system,
+            vehicle.role,
+            vehicle.slot,
+        )
+        for vehicle in FIRST_VERSION_VEHICLES
     }
     if config.vehicle_id not in expected:
         raise ValueError(f'vehicle_id must be one of: {", ".join(expected)}')
 
-    expected_namespace, expected_role, expected_slot = expected[config.vehicle_id]
+    expected_namespace, expected_target_system, expected_role, expected_slot = expected[
+        config.vehicle_id
+    ]
     if (
         config.px4_namespace != expected_namespace
+        or config.px4_target_system != expected_target_system
         or config.role is not expected_role
         or config.slot is not expected_slot
     ):
-        # 固定 vehicle_id/namespace/slot 對應，保護三機 telemetry 不被錯接到別台狀態 topic。
+        # 固定 vehicle_id/namespace/target 對應，保護三機 telemetry/command 不被錯接。
         raise ValueError(
             f'{config.vehicle_id} must map to '
-            f'{expected_namespace}, {expected_role.value}, {expected_slot.value}',
+            f'{expected_namespace}, target_system {expected_target_system}, '
+            f'{expected_role.value}, {expected_slot.value}',
         )
 
 

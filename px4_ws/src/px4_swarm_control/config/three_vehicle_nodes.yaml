@@ -4,6 +4,7 @@ vehicle_1:
     role: leader
     vehicle_id: vehicle_1
     px4_namespace: /vehicle_1
+    px4_target_system: 2
     slot: leader
     control_loop_hz: 20.0
     status_loop_hz: 5.0
@@ -18,6 +19,7 @@ vehicle_2:
     role: follower
     vehicle_id: vehicle_2
     px4_namespace: /vehicle_2
+    px4_target_system: 3
     slot: follower_left
     control_loop_hz: 20.0
     status_loop_hz: 5.0
@@ -32,6 +34,7 @@ vehicle_3:
     role: follower
     vehicle_id: vehicle_3
     px4_namespace: /vehicle_3
+    px4_target_system: 4
     slot: follower_right
     control_loop_hz: 20.0
     status_loop_hz: 5.0

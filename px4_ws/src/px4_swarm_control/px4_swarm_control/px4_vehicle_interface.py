@@ -13,6 +13,7 @@ from px4_msgs.msg import (
     VehicleLocalPosition,
     VehicleStatus as Px4VehicleStatus,
 )
+from px4_swarm_control.bridge_config import PX4_V118_OUT_TOPIC_SUFFIXES
 from px4_swarm_control.models import (
     CommandStatus,
     PositionYawSetpoint,
@@ -31,12 +32,14 @@ class Px4VehicleInterface:
         node,
         vehicle_id: str,
         px4_namespace: str,
+        px4_target_system: int = 1,
         telemetry_timeout_s: float = 0.5,
         now_us: Optional[Callable[[Any], int]] = None,
     ) -> None:
         self.node = node
         self.vehicle_id = vehicle_id
         self.px4_namespace = _normalize_namespace(px4_namespace)
+        self.px4_target_system = _validate_target_system(px4_target_system)
         self.telemetry_timeout_s = telemetry_timeout_s
         self._now_us = now_us or _node_now_us
         self.vehicle_level_state = VehicleLevelState.IDLE
@@ -63,19 +66,22 @@ class Px4VehicleInterface:
         )
         self.vehicle_local_position_subscription = node.create_subscription(
             VehicleLocalPosition,
-            self._topic('/fmu/out/vehicle_local_position'),
+            # PX4 v1.18 會在部分 out topic 加版本尾綴，集中在邊界避免 controller 訂錯 topic。
+            self._topic(PX4_V118_OUT_TOPIC_SUFFIXES[0]),
             self.handle_vehicle_local_position,
             qos_profile,
         )
         self.vehicle_status_subscription = node.create_subscription(
             Px4VehicleStatus,
-            self._topic('/fmu/out/vehicle_status'),
+            # PX4 v1.18 會在部分 out topic 加版本尾綴，集中在邊界避免 controller 訂錯 topic。
+            self._topic(PX4_V118_OUT_TOPIC_SUFFIXES[1]),
             self.handle_vehicle_status,
             qos_profile,
         )
         self.vehicle_command_ack_subscription = node.create_subscription(
             VehicleCommandAck,
-            self._topic('/fmu/out/vehicle_command_ack'),
+            # PX4 v1.18 會在部分 out topic 加版本尾綴，集中在邊界避免 controller 訂錯 topic。
+            self._topic(PX4_V118_OUT_TOPIC_SUFFIXES[2]),
             self.handle_vehicle_command_ack,
             qos_profile,
         )
@@ -193,7 +199,8 @@ class Px4VehicleInterface:
         msg.param5 = params.get('param5', 0.0)
         msg.param6 = params.get('param6', 0.0)
         msg.param7 = params.get('param7', 0.0)
-        msg.target_system = 1
+        # 每台 PX4 instance 有自己的 MAV_SYS_ID，避免 takeoff/land command 打到錯的飛機。
+        msg.target_system = self.px4_target_system
         msg.target_component = 1
         msg.source_system = 1
         msg.source_component = 1
@@ -217,6 +224,13 @@ def _normalize_namespace(namespace: str) -> str:
     if not stripped:
         return ''
     return f'/{stripped}'
+
+
+def _validate_target_system(target_system: int) -> int:
+    value = int(target_system)
+    if value < 0 or value > 255:
+        raise ValueError('px4_target_system must fit uint8, or 0 for broadcast')
+    return value
 
 
 def _node_now_us(node: Any) -> int:
