@@ -1,8 +1,14 @@
-# Ticket 07：TakeoffSwarm 到 staging 與 LandSwarm 手動驗證
+# Ticket 07：TakeoffSwarm / LandSwarm 手動 smoke 驗證
 
-目標：在第一版 SITL 中，不開啟 QGC，也能透過 ROS 2 `TakeoffSwarm` 讓三台 `gz_x500` arm/takeoff 到分開的 staging positions，最後用 `LandSwarm` 讓三台降落。
+目標：第一版 SITL 不依賴 QGC，使用 ROS 2 action 讓三台 `gz_x500` 完成：
 
-所有指令都假設你已經進入 container，且 workspace 位於：
+```text
+TakeoffSwarm -> LandSwarm -> TakeoffSwarm -> LandSwarm
+```
+
+本文件已在 2026-08-12 驗證通過。驗證結果：同一組 Micro XRCE-DDS Agent、PX4 SITL、Gazebo、vehicle nodes、ground station 不重開，第一次與第二次 `TakeoffSwarm` 都只送一次 action 就能到 staging，兩次 `LandSwarm` 都會等三台 landed 後才回成功。
+
+所有指令都假設你已經進入 container，workspace 在：
 
 ```bash
 /home/ncrl/docker_ubuntu24
@@ -10,13 +16,45 @@
 
 ## 前置條件
 
-- QGC 關閉。
-- 三機 PX4 Gz bridge 已照 `live_px4_gz_bridge_smoke.zh.md` 驗證通過。
+- QGC 關閉；QGC 只能作為 optional monitoring，不是第一版控制入口。
 - `MicroXRCEAgent udp4 -p 8888` 正在執行。
 - Gazebo 中可以看到 `x500_1`、`x500_2`、`x500_3`。
-- ROS 2 可看到 `/vehicle_1..3/fmu/out/*` 的 PX4 telemetry publishers。
+- 三台 PX4 instance 已用 `/vehicle_1`、`/vehicle_2`、`/vehicle_3` namespace 接到同一個 Micro XRCE-DDS Agent。
+- 專案已 build：
 
-## Terminal 1：確認 bridge 與 QGC-free 前置狀態
+```bash
+cd /home/ncrl/docker_ubuntu24/px4_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+```
+
+## 0. 清乾淨舊 runtime
+
+如果你要做 clean-runtime smoke，先在 container 裡清掉上一輪可能殘留的 ROS control nodes、Micro XRCE-DDS Agent、PX4 SITL、Gazebo：
+
+```bash
+pgrep -af '[M]icroXRCEAgent|[g]round_station_node|[v]ehicle_node|[p]x4 -i|[g]z sim|[g]zserver|[g]zclient'
+pkill -TERM -x MicroXRCEAgent || true
+pkill -TERM -x px4 || true
+pkill -TERM -x gz || true
+pkill -TERM -x gzserver || true
+pkill -TERM -x gzclient || true
+pgrep -f 'px4_swarm_control/lib/px4_swarm_control/[v]ehicle_node' | xargs -r kill
+pgrep -f 'px4_swarm_control/lib/px4_swarm_control/[g]round_station_node' | xargs -r kill
+pgrep -f '[g]z sim' | xargs -r kill
+sleep 2
+pgrep -af '[M]icroXRCEAgent|[g]round_station_node|[v]ehicle_node|[p]x4 -i|[g]z sim|[g]zserver|[g]zclient' || true
+```
+
+通過條件：最後一個 `pgrep` 不應再看到 `MicroXRCEAgent`、`px4 -i 1/2/3`、`gz sim`、`vehicle_node` 或 `ground_station_node`。如果還有殘留，使用 `kill <PID>` 指定清掉，再重跑最後一個 `pgrep`。
+
+清乾淨後，再照 `live_px4_gz_bridge_smoke.zh.md` 重開：
+
+```text
+MicroXRCEAgent -> PX4 instance 1 -> PX4 instance 2 -> PX4 instance 3
+```
+
+## 1. 確認 bridge 健康
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
@@ -31,9 +69,28 @@ ros2 run px4_swarm_control check_live_px4_gz_bridge --agent-log /tmp/microxrceag
 - `Gazebo model pose separation OK`
 - `ROS 2 PX4 publishers OK for all vehicle telemetry topics`
 - `Micro XRCE-DDS Agent sessions OK`
-- command exit code 為 `0`
 
-## Terminal 2：啟動 vehicle_1
+## 2. 確認沒有舊的 swarm ROS node
+
+先查是否有殘留：
+
+```bash
+pgrep -af 'ground_station_node|vehicle_node'
+```
+
+如果看到舊的 `vehicle_node` 或 `ground_station_node`，請用 `kill <PID>` 清掉。這一步很重要，因為重複的 action server 或舊 vehicle node 會讓 action feedback/status 變得不可信。
+
+清完後再次確認：
+
+```bash
+pgrep -af 'ground_station_node|vehicle_node'
+```
+
+通過條件：只剩下你自己的查詢指令，沒有舊的 swarm ROS node。
+
+## 3. 啟動三個 vehicle node
+
+Terminal vehicle_1：
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
@@ -48,7 +105,7 @@ ros2 run px4_swarm_control vehicle_node --ros-args \
   -p slot:=leader
 ```
 
-## Terminal 3：啟動 vehicle_2
+Terminal vehicle_2：
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
@@ -63,7 +120,7 @@ ros2 run px4_swarm_control vehicle_node --ros-args \
   -p slot:=follower_left
 ```
 
-## Terminal 4：啟動 vehicle_3
+Terminal vehicle_3：
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
@@ -78,7 +135,7 @@ ros2 run px4_swarm_control vehicle_node --ros-args \
   -p slot:=follower_right
 ```
 
-## Terminal 5：啟動 ground station
+## 4. 啟動 ground station
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
@@ -87,9 +144,7 @@ source install/setup.bash
 ros2 run px4_swarm_control ground_station_node
 ```
 
-通過條件：ground station 沒有 crash，且可以另開 terminal 看到 `/swarm` actions/topics。
-
-## Terminal 6：確認 actions/topics
+另開 terminal 確認 actions/topics：
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
@@ -102,39 +157,35 @@ ros2 topic list | grep -E '/swarm|/vehicle_[123]/staging_setpoint|/vehicle_[123]
 通過條件：
 
 - actions 包含 `/swarm/takeoff` 和 `/swarm/land`
-- topics 包含 `/vehicle_1/staging_setpoint`、`/vehicle_2/staging_setpoint`、`/vehicle_3/staging_setpoint`
 - topics 包含 `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status`
+- topics 包含 `/vehicle_1/staging_setpoint`、`/vehicle_2/staging_setpoint`、`/vehicle_3/staging_setpoint`
 
-## Terminal 6：送出第一次 TakeoffSwarm
+## 5. 第一次 TakeoffSwarm
 
 ```bash
 ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
-  "{altitude_m: 5.0, timeout_sec: 60.0}" --feedback
+  "{altitude_m: 5.0, timeout_sec: 120.0}" --feedback
 ```
 
 通過條件：
 
-- action goal accepted
-- feedback 顯示 `current_state: taking_off`
-- action 不會在命令剛送出時立刻 success；它會等三台都抵達 staging，或 timeout 後回報 failure
-- result 顯示 `success: true` 時，代表三台已經真的抵達 staging
-- vehicle node terminal 會輸出中文說明：
+- action goal accepted。
+- feedback 一開始是 `current_state: taking_off`，且不會剛送出就 success。
+- feedback 最後要到 `vehicles_staged: 3`、`progress: 1.0`。
+- result 顯示：
+
+```text
+success: true
+message: all vehicles reached staging positions
+```
+
+- vehicle node terminal 會印出：
 
 ```text
 不依賴 QGC：先用 PX4 NAV_TAKEOFF 到安全高度，再 warm up Offboard 後切換 staging control。
 ```
 
-- Gazebo 中三台飛機先垂直起飛到安全高度，接著才切入 Offboard 並往分開的 staging positions 移動：
-  - `vehicle_1` staging target 約為 `(0.0, 0.0, -5.0)`
-  - `vehicle_2` staging target 約為 `(-3.0, 4.0, -5.0)`
-  - `vehicle_3` staging target 約為 `(-3.0, -4.0, -5.0)`
-- ground station terminal 最後會輸出：
-
-```text
-all vehicles reached staging positions
-```
-
-## Terminal 6：觀察 takeoff、Offboard、staging status
+## 6. 檢查 staging status
 
 ```bash
 ros2 topic echo --once /vehicle_1/status
@@ -144,40 +195,49 @@ ros2 topic echo --once /vehicle_3/status
 
 通過條件：
 
-- 三台 status 都有有限的 `x/y/z/yaw`，不是 `nan`
-- `armed: true`
-- 起飛初期三台先到安全高度，例如 `altitude_m: 5.0` 時 `z < -4.0`
-- staging 完成前，三台都要看到 `nav_state: offboard` 或 `offboard_available: true`
-- staging 完成後，三台 `vehicle_state` 會進入 `staging`
-- staging 完成後位置應接近：
+- 三台 `x/y/z/yaw` 都是有限數值，不是 `nan`。
+- 三台 `armed: true`。
+- 三台 `nav_state: offboard`。
+- 三台 `vehicle_state: staging`。
+- 位置接近：
   - `vehicle_1`: `x ~= 0.0`, `y ~= 0.0`, `z ~= -5.0`
   - `vehicle_2`: `x ~= -3.0`, `y ~= 4.0`, `z ~= -5.0`
   - `vehicle_3`: `x ~= -3.0`, `y ~= -4.0`, `z ~= -5.0`
-- ground station 只有在三台都有 telemetry、armed、Offboard ready、且位置到 tolerance 內時，才會輸出 `all vehicles reached staging positions`
 
-## Terminal 6：送出 LandSwarm
+本次驗證觀察到的第二輪 staging 範例：
+
+```text
+vehicle_1: x=0.001,  y=0.006,  z=-5.005, nav_state=offboard, vehicle_state=staging
+vehicle_2: x=-2.990, y=3.984,  z=-5.004, nav_state=offboard, vehicle_state=staging
+vehicle_3: x=-2.997, y=-3.998, z=-5.008, nav_state=offboard, vehicle_state=staging
+```
+
+## 7. 第一次 LandSwarm
 
 ```bash
 ros2 action send_goal /swarm/land px4_swarm_interfaces/action/LandSwarm \
-  "{timeout_sec: 60.0}" --feedback
+  "{timeout_sec: 120.0}" --feedback
 ```
 
 通過條件：
 
-- action goal accepted
-- feedback 顯示 `current_state: landing`
-- action 不會在 land command 剛送出時立刻 success；它會等三台都回報 landed，或 timeout 後回報 failure
-- result 顯示 `success: true` 時，代表三台都已經透過 PX4 landed telemetry 確認 landed
-- Gazebo 中三台飛機開始降落
-- 送出 land 後，三台 `/vehicle_N/status` 的 `vehicle_state` 應保持 `landing`，不能被一般 control tick 改回 `holding`
-- 三台最後必須透過 PX4 landed telemetry 進入 `vehicle_state: landed`
-- ground station terminal 最後會輸出類似：
+- action goal accepted。
+- feedback 一開始是 `current_state: landing`。
+- feedback 最後要到 `vehicles_landed: 3`。
+- result 顯示：
+
+```text
+success: true
+message: all vehicles reported landed
+```
+
+- ground station terminal 會輸出：
 
 ```text
 swarm mission landing -> done: all vehicles reported landed
 ```
 
-可用下列指令重複觀察：
+## 8. 檢查 landed status
 
 ```bash
 ros2 topic echo --once /vehicle_1/status
@@ -185,77 +245,81 @@ ros2 topic echo --once /vehicle_2/status
 ros2 topic echo --once /vehicle_3/status
 ```
 
-如果想確認 land 後 vehicle node 沒有繼續發空中 staging setpoint，可以在送出 LandSwarm 後另開 terminal 觀察：
+通過條件：
 
-```bash
-ros2 topic hz /vehicle_1/fmu/in/trajectory_setpoint --window 10
-ros2 topic hz /vehicle_2/fmu/in/trajectory_setpoint --window 10
-ros2 topic hz /vehicle_3/fmu/in/trajectory_setpoint --window 10
-```
+- 三台 `armed: false`。
+- 三台 `vehicle_state: landed`。
+- 三台高度回到地面附近，例如 `z` 約在 `-0.1` 到 `0.1` 之間。
 
-通過條件：進入 `landing` 後不應再看到持續的 20 Hz staging setpoint；三台最後在 Gazebo 地面穩定停住並回報 `landed`。
+注意：PX4 在落地後可能仍短暫顯示 `nav_state: offboard` 或 `offboard_available: true`。第一版 status 是否 landed 以 PX4 landed telemetry 加上 ROS 2 vehicle state 為準，不用只看 `nav_state`。
 
-## Terminal 6：不重開 runtime，送出第二次 TakeoffSwarm
+## 9. 不重開 runtime，第二次 TakeoffSwarm
 
-第一輪 `LandSwarm` 成功後，不要重開 Micro XRCE-DDS Agent、PX4 SITL、Gazebo、vehicle nodes 或 ground station，直接送第二次 takeoff：
+不要重開 Micro XRCE-DDS Agent、PX4 SITL、Gazebo、vehicle nodes 或 ground station，直接送第二次 takeoff：
 
 ```bash
 ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
-  "{altitude_m: 5.0, timeout_sec: 60.0}" --feedback
+  "{altitude_m: 5.0, timeout_sec: 120.0}" --feedback
 ```
 
 通過條件：
 
-- 不需要送第二次相同 takeoff action
-- 三台飛機再次 arm/takeoff，並進入 Offboard staging control
-- `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status` 在飛機已離地時不會顯示 `vehicle_state: landed`
-- 三台再次抵達 staging：
-  - `vehicle_1`: `x ~= 0.0`, `y ~= 0.0`, `z ~= -5.0`
-  - `vehicle_2`: `x ~= -3.0`, `y ~= 4.0`, `z ~= -5.0`
-  - `vehicle_3`: `x ~= -3.0`, `y ~= -4.0`, `z ~= -5.0`
-- ground station 再次輸出：
+- 不需要重送第二次相同 action。
+- action 最後 `success: true`。
+- feedback 最後 `vehicles_staged: 3`。
+- 三台再次 `armed: true`、`nav_state: offboard`、`vehicle_state: staging`。
+- 三台再次回到相同 staging positions。
 
-```text
-all vehicles reached staging positions
-```
+這一步保護的問題是：上一輪 landing 後，ROS 2 不能保留 stale `landed` 或 stale staging state，否則第二次 takeoff 會出現「Gazebo 已飛、status 還顯示 landed」或「action 提早 success」。
 
-- action result 顯示 `success: true`
-
-## Terminal 6：不重開 runtime，送出第二次 LandSwarm
+## 10. 不重開 runtime，第二次 LandSwarm
 
 ```bash
 ros2 action send_goal /swarm/land px4_swarm_interfaces/action/LandSwarm \
-  "{timeout_sec: 60.0}" --feedback
+  "{timeout_sec: 120.0}" --feedback
 ```
 
 通過條件：
 
-- 三台飛機再次進入 landing，最後在 Gazebo 地面穩定停住
-- 三台 `/vehicle_N/status` 最後都顯示 `vehicle_state: landed`
-- ground station 再次輸出 `swarm mission landing -> done: all vehicles reported landed`
-- action result 顯示 `success: true`
+- action 最後 `success: true`。
+- feedback 最後 `vehicles_landed: 3`。
+- 三台在 Gazebo 地面穩定停住。
+- 三台 `/vehicle_N/status` 最後都是 `armed: false`、`vehicle_state: landed`。
 
-## repeated cycle 總通過條件
+本次驗證觀察到的最終 landed 範例：
 
-完整 manual smoke 要能在同一組 runtime 中完成：
+```text
+vehicle_1: z=0.025,  armed=false, vehicle_state=landed
+vehicle_2: z=-0.062, armed=false, vehicle_state=landed
+vehicle_3: z=0.001,  armed=false, vehicle_state=landed
+```
+
+## 整體通過條件
+
+完整 smoke 必須在同一組 runtime 中完成：
 
 ```text
 TakeoffSwarm -> LandSwarm -> TakeoffSwarm -> LandSwarm
 ```
 
-通過條件：
+而且符合：
 
-- 第一次和第二次 `TakeoffSwarm` 都只需要送一次 action
-- 第一次和第二次 `TakeoffSwarm` 都要等三台抵達 staging 後才回 `success: true`
-- 第一次和第二次 `LandSwarm` 都要等三台 confirmed landed 後才回 `success: true`
-- Gazebo 畫面、PX4 telemetry、`/vehicle_*/status` 在每個 milestone 都一致
+- 兩次 `TakeoffSwarm` 都只送一次 action。
+- 兩次 `TakeoffSwarm` 都等三台真的抵達 staging 後才回 `success: true`。
+- 兩次 `LandSwarm` 都等三台真的 landed 後才回 `success: true`。
+- Gazebo 畫面、PX4 telemetry、`/vehicle_*/status` 在每個 milestone 都一致。
 
-## 如果未開 QGC 起飛失敗
+## 本次修正重點
 
-不要先開 QGC 當 workaround。請保留各 terminal 輸出，改用 `$diagnosing-bugs`，至少蒐集：
+- ground station 在 `TakeoffSwarm` 等待期間會重送 staging setpoint 與 mission command，避免 vehicle node 先收到 takeoff、後收到 staging target 時錯過目標。
+- vehicle node 會先讓 PX4 用 `NAV_TAKEOFF` 起飛到安全高度，再 warm up Offboard heartbeat 與 trajectory setpoint，最後才切 Offboard。
+- vehicle node 只有在 PX4 真的 `nav_state: offboard`、且高度已達標、且不是地面 landed telemetry 時，才承認 Offboard staging 成功。
+- `LandSwarm` 後 vehicle node 會進入 `landing`，停止發布空中 staging setpoint，並等 PX4 landed telemetry 後才進 `landed`。
+- `LandSwarm` 會清掉上一輪 staging latch，避免下一輪 `TAKEOFF` 比新 staging setpoint 早到時吃到舊目標。
 
-- `VehicleCommandAck`
-- `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status`
-- PX4 terminal 中 commander / preflight / arming 相關訊息
-- Micro XRCE-DDS Agent log
-- `ros2 topic info -v` 對 PX4 input/output topics 的 publisher/subscriber 狀態
+## 常見失敗判讀
+
+- 看到 duplicate action server warning：通常是舊的 `ground_station_node` 沒清掉，回到第 2 步清 runtime。
+- `/vehicle_N/status` 是 `nan`：通常是該 PX4 instance 沒有真正 publisher，先重跑 bridge smoke check。
+- Gazebo 飛了但 status 還是 `landed`：代表 landed/staging state 有殘留或 Offboard 接受條件太早，需要保留 logs 後用 `$diagnosing-bugs`。
+- 未開 QGC 起飛失敗：不要先開 QGC 當 workaround，請保留 `VehicleCommandAck`、三台 `/vehicle_N/status`、PX4 terminal、Micro XRCE-DDS Agent log。

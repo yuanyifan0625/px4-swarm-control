@@ -73,7 +73,7 @@ cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 run px4_swarm_control operator_console --ros-args \
-  --params-file src/px4_swarm_control/config/operator_console.yaml
+  --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml
 ```
 
 Console 會顯示短指令說明：
@@ -85,6 +85,8 @@ s=status, p=pause, r=resume, q=quit, h=help
 ```
 
 注意：PX4 local position 使用 NED 座標，所以 `4` 的「上升 1m」實際會讓 MoveLeader goal 的 `z` 減少 `1.0`。
+
+注意：`--params-file` 後面的路徑會依照目前終端機所在目錄解析。使用上面的絕對路徑，可以避免你人在 `PX4-Autopilot` 目錄時，ROS 2 找不到 `px4_ws/src/.../operator_console.yaml`。
 
 ## 3. 使用 console 起飛
 
@@ -183,8 +185,12 @@ r
 如果只想測單一短指令，也可以不用進互動式 prompt：
 
 ```bash
-ros2 run px4_swarm_control operator_console -- --command s
-ros2 run px4_swarm_control operator_console -- --command 1
+ros2 run px4_swarm_control operator_console --ros-args \
+  --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml \
+  -- --command s
+ros2 run px4_swarm_control operator_console --ros-args \
+  --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml \
+  -- --command 1
 ```
 
 通過條件：每次只執行一個 console command 後退出；這只是手動 action 的短指令包裝，不會改變既有 action API。

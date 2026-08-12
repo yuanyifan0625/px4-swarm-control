@@ -56,6 +56,7 @@ PX4_SIM_MODEL=gz_x500 \
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/PX4-Autopilot
+PX4_GZ_NO_FOLLOW=1 \
 PX4_UXRCE_DDS_NS=vehicle_3 \
 PX4_GZ_STANDALONE=1 \
 PX4_SYS_AUTOSTART=4001 \

@@ -80,7 +80,7 @@ ros2 topic list | grep -E '/swarm/leader_goal|/swarm/move_leader|/vehicle_[123]/
 ## 3. TakeoffSwarm 到 staging
 
 ```bash
-ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
+ros2 action send_goal /swarm/takeoff \ px4_swarm_interfaces/action/TakeoffSwarm \
   "{altitude_m: 5.0, timeout_sec: 120.0}" --feedback
 ```
 
