@@ -1,0 +1,179 @@
+from math import isclose, pi
+
+from px4_swarm_control.operator_console import (
+    ConsoleActionResult,
+    ConsoleCommandDispatcher,
+    OperatorConsoleConfig,
+    SwarmActionGateway,
+)
+from px4_swarm_interfaces.msg import VehicleStatus
+
+
+class FakeGateway(SwarmActionGateway):
+    def __init__(self, leader_status=None, paused=False, action_results=None):
+        self.leader_status = leader_status
+        self.paused = paused
+        self.action_results = action_results or {}
+        self.calls = []
+
+    def get_leader_status(self):
+        return self.leader_status
+
+    def is_paused(self):
+        return self.paused
+
+    def describe_status(self):
+        return 'paused' if self.paused else 'running'
+
+    def takeoff(self, altitude_m, timeout_sec):
+        self.calls.append(('takeoff', altitude_m, timeout_sec))
+        return self.action_results.get('takeoff', ConsoleActionResult(True, 'takeoff ok'))
+
+    def move_leader(
+        self,
+        x,
+        y,
+        z,
+        yaw,
+        position_tolerance_m,
+        yaw_tolerance_rad,
+        timeout_sec,
+    ):
+        self.calls.append(
+            (
+                'move_leader',
+                x,
+                y,
+                z,
+                yaw,
+                position_tolerance_m,
+                yaw_tolerance_rad,
+                timeout_sec,
+            )
+        )
+        return self.action_results.get('move_leader', ConsoleActionResult(True, 'move ok'))
+
+    def change_formation(self, formation_mode, timeout_sec):
+        self.calls.append(('change_formation', formation_mode, timeout_sec))
+        return self.action_results.get(
+            'change_formation',
+            ConsoleActionResult(True, 'formation ok'),
+        )
+
+    def pause(self, pause, reason):
+        self.calls.append(('pause', pause, reason))
+        self.paused = pause
+        return self.action_results.get('pause', ConsoleActionResult(True, 'pause ok'))
+
+    def land(self, timeout_sec):
+        self.calls.append(('land', timeout_sec))
+        return self.action_results.get('land', ConsoleActionResult(True, 'land ok'))
+
+
+def leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.25):
+    status = VehicleStatus()
+    status.vehicle_id = 1
+    status.x = x
+    status.y = y
+    status.z = z
+    status.yaw = yaw
+    status.vehicle_state = 'following'
+    return status
+
+
+def test_numeric_commands_call_existing_swarm_actions_with_configured_defaults():
+    config = OperatorConsoleConfig(
+        takeoff_altitude_m=6.0,
+        default_timeout_sec=70.0,
+        move_step_x_m=1.5,
+        move_step_y_m=2.5,
+        altitude_step_m=0.75,
+        yaw_step_rad=0.5,
+        move_position_tolerance_m=0.3,
+        move_yaw_tolerance_rad=0.1,
+    )
+    gateway = FakeGateway(leader_status=leader_status())
+    dispatcher = ConsoleCommandDispatcher(config, gateway)
+
+    assert dispatcher.dispatch('1').success is True
+    assert dispatcher.dispatch('6').success is True
+    assert dispatcher.dispatch('7').success is True
+    assert dispatcher.dispatch('8').success is True
+
+    assert gateway.calls == [
+        ('takeoff', 6.0, 70.0),
+        ('change_formation', 'vee', 70.0),
+        ('change_formation', 'line_abreast', 70.0),
+        ('land', 70.0),
+    ]
+
+
+def test_relative_leader_jog_commands_convert_from_current_status_to_absolute_goal():
+    config = OperatorConsoleConfig(
+        move_step_x_m=1.0,
+        move_step_y_m=1.0,
+        altitude_step_m=1.0,
+        yaw_step_rad=pi / 4.0,
+        move_position_tolerance_m=0.3,
+        move_yaw_tolerance_rad=0.2,
+        default_timeout_sec=60.0,
+    )
+    gateway = FakeGateway(leader_status=leader_status(x=1.0, y=2.0, z=-5.0, yaw=0.0))
+    dispatcher = ConsoleCommandDispatcher(config, gateway)
+
+    dispatcher.dispatch('2')
+    dispatcher.dispatch('3')
+    dispatcher.dispatch('4')
+    dispatcher.dispatch('5')
+
+    move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
+    assert move_calls[0][1:5] == (2.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:5] == (1.0, 3.0, -5.0, 0.0)
+    assert move_calls[2][1:5] == (1.0, 2.0, -6.0, 0.0)
+    assert move_calls[3][1:4] == (1.0, 2.0, -5.0)
+    assert isclose(move_calls[3][4], pi / 4.0)
+
+
+def test_paused_console_allows_status_resume_and_land_but_blocks_motion_and_macro():
+    gateway = FakeGateway(leader_status=leader_status(), paused=True)
+    dispatcher = ConsoleCommandDispatcher(OperatorConsoleConfig(), gateway)
+
+    assert dispatcher.dispatch('s').success is True
+    assert dispatcher.dispatch('r').success is True
+    gateway.paused = True
+    assert dispatcher.dispatch('8').success is True
+    assert dispatcher.dispatch('2').success is False
+    assert dispatcher.dispatch('6').success is False
+    assert dispatcher.dispatch('9').success is False
+
+    assert ('pause', False, 'operator console resume') in gateway.calls
+    assert ('land', 60.0) in gateway.calls
+    assert all(call[0] != 'move_leader' for call in gateway.calls)
+
+
+def test_demo_macro_stops_on_first_failed_action():
+    gateway = FakeGateway(
+        leader_status=leader_status(x=0.0, y=0.0, z=-5.0, yaw=0.0),
+        action_results={'move_leader': ConsoleActionResult(False, 'move failed')},
+    )
+    dispatcher = ConsoleCommandDispatcher(OperatorConsoleConfig(), gateway)
+
+    result = dispatcher.dispatch('9')
+
+    assert result.success is False
+    assert 'move failed' in result.message
+    assert gateway.calls == [
+        ('takeoff', 5.0, 60.0),
+        ('move_leader', 1.0, 0.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+    ]
+
+
+def test_unknown_command_returns_helpful_failure_without_calling_actions():
+    gateway = FakeGateway(leader_status=leader_status())
+    dispatcher = ConsoleCommandDispatcher(OperatorConsoleConfig(), gateway)
+
+    result = dispatcher.dispatch('bad')
+
+    assert result.success is False
+    assert 'unknown command' in result.message
+    assert gateway.calls == []

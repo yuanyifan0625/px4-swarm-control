@@ -24,6 +24,7 @@ setup(
         "console_scripts": [
             "check_live_px4_gz_bridge = px4_swarm_control.live_bridge_smoke:main",
             "ground_station_node = px4_swarm_control.ground_station_node:main",
+            "operator_console = px4_swarm_control.operator_console:main",
             "vehicle_node = px4_swarm_control.vehicle_node:main",
         ],
     },
