@@ -105,7 +105,7 @@ ros2 topic list | grep -E '/swarm|/vehicle_[123]/staging_setpoint|/vehicle_[123]
 - topics 包含 `/vehicle_1/staging_setpoint`、`/vehicle_2/staging_setpoint`、`/vehicle_3/staging_setpoint`
 - topics 包含 `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status`
 
-## Terminal 6：送出 TakeoffSwarm
+## Terminal 6：送出第一次 TakeoffSwarm
 
 ```bash
 ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
@@ -116,7 +116,8 @@ ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
 
 - action goal accepted
 - feedback 顯示 `current_state: taking_off`
-- result 顯示 `success: true`
+- action 不會在命令剛送出時立刻 success；它會等三台都抵達 staging，或 timeout 後回報 failure
+- result 顯示 `success: true` 時，代表三台已經真的抵達 staging
 - vehicle node terminal 會輸出中文說明：
 
 ```text
@@ -165,7 +166,8 @@ ros2 action send_goal /swarm/land px4_swarm_interfaces/action/LandSwarm \
 
 - action goal accepted
 - feedback 顯示 `current_state: landing`
-- result 顯示 `success: true`
+- action 不會在 land command 剛送出時立刻 success；它會等三台都回報 landed，或 timeout 後回報 failure
+- result 顯示 `success: true` 時，代表三台都已經透過 PX4 landed telemetry 確認 landed
 - Gazebo 中三台飛機開始降落
 - 送出 land 後，三台 `/vehicle_N/status` 的 `vehicle_state` 應保持 `landing`，不能被一般 control tick 改回 `holding`
 - 三台最後必須透過 PX4 landed telemetry 進入 `vehicle_state: landed`
@@ -192,6 +194,61 @@ ros2 topic hz /vehicle_3/fmu/in/trajectory_setpoint --window 10
 ```
 
 通過條件：進入 `landing` 後不應再看到持續的 20 Hz staging setpoint；三台最後在 Gazebo 地面穩定停住並回報 `landed`。
+
+## Terminal 6：不重開 runtime，送出第二次 TakeoffSwarm
+
+第一輪 `LandSwarm` 成功後，不要重開 Micro XRCE-DDS Agent、PX4 SITL、Gazebo、vehicle nodes 或 ground station，直接送第二次 takeoff：
+
+```bash
+ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
+  "{altitude_m: 5.0, timeout_sec: 60.0}" --feedback
+```
+
+通過條件：
+
+- 不需要送第二次相同 takeoff action
+- 三台飛機再次 arm/takeoff，並進入 Offboard staging control
+- `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status` 在飛機已離地時不會顯示 `vehicle_state: landed`
+- 三台再次抵達 staging：
+  - `vehicle_1`: `x ~= 0.0`, `y ~= 0.0`, `z ~= -5.0`
+  - `vehicle_2`: `x ~= -3.0`, `y ~= 4.0`, `z ~= -5.0`
+  - `vehicle_3`: `x ~= -3.0`, `y ~= -4.0`, `z ~= -5.0`
+- ground station 再次輸出：
+
+```text
+all vehicles reached staging positions
+```
+
+- action result 顯示 `success: true`
+
+## Terminal 6：不重開 runtime，送出第二次 LandSwarm
+
+```bash
+ros2 action send_goal /swarm/land px4_swarm_interfaces/action/LandSwarm \
+  "{timeout_sec: 60.0}" --feedback
+```
+
+通過條件：
+
+- 三台飛機再次進入 landing，最後在 Gazebo 地面穩定停住
+- 三台 `/vehicle_N/status` 最後都顯示 `vehicle_state: landed`
+- ground station 再次輸出 `swarm mission landing -> done: all vehicles reported landed`
+- action result 顯示 `success: true`
+
+## repeated cycle 總通過條件
+
+完整 manual smoke 要能在同一組 runtime 中完成：
+
+```text
+TakeoffSwarm -> LandSwarm -> TakeoffSwarm -> LandSwarm
+```
+
+通過條件：
+
+- 第一次和第二次 `TakeoffSwarm` 都只需要送一次 action
+- 第一次和第二次 `TakeoffSwarm` 都要等三台抵達 staging 後才回 `success: true`
+- 第一次和第二次 `LandSwarm` 都要等三台 confirmed landed 後才回 `success: true`
+- Gazebo 畫面、PX4 telemetry、`/vehicle_*/status` 在每個 milestone 都一致
 
 ## 如果未開 QGC 起飛失敗
 

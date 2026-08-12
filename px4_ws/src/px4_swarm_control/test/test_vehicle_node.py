@@ -421,6 +421,50 @@ def test_landed_px4_state_is_reported_as_landed_vehicle_status():
     assert status_publisher.messages[-1].vehicle_state == 'landed'
 
 
+def test_airborne_px4_telemetry_clears_stale_internal_landed_status():
+    state = vehicle_state(
+        z=-4.0,
+        armed=True,
+        navigation_state='auto_takeoff',
+        landed=False,
+        vehicle_level_state=VehicleLevelState.LANDED,
+    )
+    status_publisher = FakePublisher()
+    core = make_core(
+        px4_interface=FakePx4Interface(state=state),
+        status_publisher=status_publisher,
+    )
+    core.transition_to(VehicleLevelState.LANDED, 'previous land completed')
+
+    core.publish_status()
+
+    assert core.vehicle_level_state is not VehicleLevelState.LANDED
+    assert status_publisher.messages[-1].vehicle_state != 'landed'
+
+
+def test_takeoff_sequence_ignores_grounded_landed_telemetry_until_airborne():
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            z=-0.05,
+            armed=False,
+            navigation_state='auto_takeoff',
+            landed=True,
+            vehicle_level_state=VehicleLevelState.TAKING_OFF,
+        ),
+    )
+    core = make_core(px4_interface=px4_interface)
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+    mission = MissionCommand()
+    mission.command = MissionCommand.TAKEOFF
+    core.handle_mission_command(mission)
+
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
+    assert px4_interface.arm_calls == 1
+    assert px4_interface.takeoff_altitudes == [(5.0, 0.0)]
+
+
 def test_publish_status_uses_internal_vehicle_state_when_available():
     state = VehicleState(
         vehicle_id='vehicle_2',

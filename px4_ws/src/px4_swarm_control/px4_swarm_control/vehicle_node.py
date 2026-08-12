@@ -101,6 +101,8 @@ class VehicleNodeCore:
             self._start_takeoff_without_qgc()
             return
         if msg.command == MissionCommand.LAND:
+            self._takeoff_to_staging_active = False
+            self._pending_takeoff_until_staging = False
             self.px4_interface.land()
             self.transition_to(VehicleLevelState.LANDING, 'land command accepted')
             return
@@ -138,15 +140,16 @@ class VehicleNodeCore:
 
     def control_tick(self) -> None:
         state = self.px4_interface.vehicle_state()
-        if self._state_is_landed(state):
-            self._takeoff_to_staging_active = False
-            self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
-            return
         if self.vehicle_level_state is VehicleLevelState.LANDING:
             # 降落期間不再送空中 staging setpoint，保護 PX4 landing mode 不被 ROS 2 搶控制權。
+            if self._state_is_landed(state):
+                self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
             return
         if self._takeoff_to_staging_active:
             self._control_takeoff_to_staging(state)
+            return
+        if self._state_is_landed(state):
+            self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
             return
 
         self.px4_interface.publish_offboard_heartbeat()
@@ -203,10 +206,22 @@ class VehicleNodeCore:
         return state.offboard_available or state.navigation_state == 'offboard'
 
     def _state_is_landed(self, state) -> bool:
-        return state is not None and (
-            getattr(state, 'landed', False)
-            or state.vehicle_level_state is VehicleLevelState.LANDED
-        )
+        if state is None or not getattr(state, 'landed', False):
+            return False
+        if self._takeoff_to_staging_active:
+            return False
+        if state.armed and state.position[2] < -0.5:
+            return False
+        return True
+
+    def _status_vehicle_level_state(self, state) -> VehicleLevelState:
+        if self._state_is_landed(state):
+            return VehicleLevelState.LANDED
+        if state.vehicle_level_state is VehicleLevelState.LANDED:
+            # PX4 已回報非 landed 時清掉舊狀態，保護下一次 takeoff 不被上次 landing 殘留卡住。
+            self.transition_to(VehicleLevelState.HOLDING, 'PX4 airborne telemetry')
+            return VehicleLevelState.HOLDING
+        return state.vehicle_level_state
 
     def publish_status(self) -> None:
         state = self.px4_interface.vehicle_state()
@@ -239,10 +254,9 @@ class VehicleNodeCore:
                     )
                     self._warned_mismatched_vehicle_state = True
                 return
-            status_vehicle_state = state.vehicle_level_state
-            if self._state_is_landed(state):
+            status_vehicle_state = self._status_vehicle_level_state(state)
+            if status_vehicle_state is VehicleLevelState.LANDED:
                 self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
-                status_vehicle_state = VehicleLevelState.LANDED
 
             msg.x, msg.y, msg.z = state.position
             msg.yaw = state.yaw

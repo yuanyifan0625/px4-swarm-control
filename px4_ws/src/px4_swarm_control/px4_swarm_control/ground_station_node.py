@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from math import isfinite
+from time import monotonic
 from typing import Callable, Dict
 
 from builtin_interfaces.msg import Time
@@ -75,18 +77,30 @@ class GroundStationCore:
         publishers: GroundStationPublishers,
         logger,
         now_stamp: Callable[[], Time],
+        now_s: Callable[[], float] = monotonic,
     ) -> None:
         self.config = config
         self.publishers = publishers
         self.logger = logger
         self.now_stamp = now_stamp
+        self.now_s = now_s
         self.mission_state = MissionState.IDLE
         self.active_formation = config.active_formation
         self.vehicle_statuses: Dict[int, VehicleStatus] = {}
         self.staging_targets: Dict[int, PositionYawSetpoint] = {}
         self._staging_complete_logged = False
+        self._takeoff_started_s: float | None = None
+        self._takeoff_timeout_s: float | None = None
+        self._land_started_s: float | None = None
+        self._land_timeout_s: float | None = None
 
-    def handle_takeoff(self, request: TakeoffSwarm.Goal):
+    def start_takeoff(self, request: TakeoffSwarm.Goal):
+        # 新任務先清掉舊 status，保護 action completion 不被上一輪 landed/staging 污染。
+        self.vehicle_statuses = {}
+        self._takeoff_started_s = self.now_s()
+        self._takeoff_timeout_s = max(float(request.timeout_sec), 0.0)
+        self._land_started_s = None
+        self._land_timeout_s = None
         self._transition_to(MissionState.TAKING_OFF, 'takeoff action accepted')
         self._publish_staging_setpoints(request.altitude_m)
         mission = self._mission_command(
@@ -94,17 +108,32 @@ class GroundStationCore:
             f'altitude_m={request.altitude_m:.2f} timeout_sec={request.timeout_sec:.2f}',
         )
         self.publishers.mission_command.publish(mission)
+        return self.takeoff_feedback()
 
+    def takeoff_feedback(self) -> TakeoffSwarm.Feedback:
         feedback = TakeoffSwarm.Feedback()
         feedback.current_state = self.mission_state.value
-        feedback.progress = 0.0
-        feedback.vehicles_staged = 0
+        feedback.vehicles_staged = self._count_staged_vehicles()
         feedback.total_vehicles = self.config.total_vehicles
+        feedback.progress = (
+            float(feedback.vehicles_staged) / float(feedback.total_vehicles)
+            if feedback.total_vehicles
+            else 0.0
+        )
+        return feedback
 
+    def takeoff_result(self) -> TakeoffSwarm.Result | None:
         result = TakeoffSwarm.Result()
-        result.success = True
-        result.message = 'takeoff command accepted and published'
-        return ActionOutcome(result=result, feedback=feedback)
+        if self.mission_state is MissionState.STAGING:
+            result.success = True
+            result.message = 'all vehicles reached staging positions'
+            return result
+        if self._takeoff_timed_out():
+            self._transition_to(MissionState.ERROR, 'takeoff staging timed out')
+            result.success = False
+            result.message = 'takeoff staging timed out'
+            return result
+        return None
 
     def handle_move_leader(self, request: MoveLeader.Goal):
         self._transition_to(MissionState.FOLLOWING, 'leader goal accepted')
@@ -181,7 +210,13 @@ class GroundStationCore:
         result.message = f'{command} command accepted and published'
         return ActionOutcome(result=result, feedback=feedback)
 
-    def handle_land(self, request: LandSwarm.Goal):
+    def start_land(self, request: LandSwarm.Goal):
+        # LandSwarm 只看本輪降落後的新 status，避免上一輪 landed cache 直接完成 action。
+        self.vehicle_statuses = {}
+        self._land_started_s = self.now_s()
+        self._land_timeout_s = max(float(request.timeout_sec), 0.0)
+        self._takeoff_started_s = None
+        self._takeoff_timeout_s = None
         self._transition_to(MissionState.LANDING, 'land-all action accepted')
         self.publishers.mission_command.publish(
             self._mission_command(
@@ -189,15 +224,27 @@ class GroundStationCore:
                 f'timeout_sec={request.timeout_sec:.2f}',
             ),
         )
+        return self.land_feedback()
+
+    def land_feedback(self) -> LandSwarm.Feedback:
         feedback = LandSwarm.Feedback()
         feedback.current_state = self.mission_state.value
-        feedback.vehicles_landed = 0
+        feedback.vehicles_landed = self._count_landed_vehicles()
         feedback.total_vehicles = self.config.total_vehicles
+        return feedback
 
+    def land_result(self) -> LandSwarm.Result | None:
         result = LandSwarm.Result()
-        result.success = True
-        result.message = 'land-all command accepted and published'
-        return ActionOutcome(result=result, feedback=feedback)
+        if self.mission_state is MissionState.DONE:
+            result.success = True
+            result.message = 'all vehicles reported landed'
+            return result
+        if self._land_timed_out():
+            self._transition_to(MissionState.ERROR, 'land-all timed out')
+            result.success = False
+            result.message = 'land-all timed out'
+            return result
+        return None
 
     def handle_vehicle_status(self, msg: VehicleStatus) -> None:
         self.vehicle_statuses[int(msg.vehicle_id)] = msg
@@ -205,7 +252,10 @@ class GroundStationCore:
             # 任一 vehicle 進入 failsafe 代表任務層要停止正常流程，避免繼續發布移動命令。
             self._transition_to(MissionState.FAILSAFE, 'vehicle reported failsafe')
             return
-        if self._all_known_vehicles_in_state(VehicleLevelState.LANDED.value):
+        if (
+            self.mission_state is MissionState.LANDING
+            and self._all_vehicles_landed()
+        ):
             # 全隊 landed 才把任務收斂到 done，避免單機降落時誤判整隊完成。
             self._transition_to(MissionState.DONE, 'all vehicles reported landed')
             return
@@ -258,15 +308,29 @@ class GroundStationCore:
             # 由 ground station 只分派目標位置，保護每台 vehicle node 仍只控制自己的 PX4。
             target = staging_setpoint(leader, vehicle.slot, geometry)
             self.staging_targets[vehicle.px4_instance] = target
-            msg = VehicleSetpoint()
-            msg.stamp = self.now_stamp()
-            msg.vehicle_id = vehicle.px4_instance
-            msg.frame_id = 'world'
-            msg.x = target.x
-            msg.y = target.y
-            msg.z = target.z
-            msg.yaw = target.yaw
-            self.publishers.vehicle_setpoints[vehicle.px4_instance].publish(msg)
+            self._publish_vehicle_setpoint(vehicle.px4_instance, target)
+
+    def republish_staging_setpoints(self) -> None:
+        if not self.staging_targets:
+            return
+        # 等待 action 完成期間重送 staging target，保護 late subscriber 不錯過 single-shot 目標。
+        for vehicle_id, target in self.staging_targets.items():
+            self._publish_vehicle_setpoint(vehicle_id, target)
+
+    def _publish_vehicle_setpoint(
+        self,
+        vehicle_id: int,
+        target: PositionYawSetpoint,
+    ) -> None:
+        msg = VehicleSetpoint()
+        msg.stamp = self.now_stamp()
+        msg.vehicle_id = vehicle_id
+        msg.frame_id = 'world'
+        msg.x = target.x
+        msg.y = target.y
+        msg.z = target.z
+        msg.yaw = target.yaw
+        self.publishers.vehicle_setpoints[vehicle_id].publish(msg)
 
     def _all_vehicles_staged(self) -> bool:
         if len(self.staging_targets) < self.config.total_vehicles:
@@ -281,6 +345,46 @@ class GroundStationCore:
                 self.config.telemetry_fresh_timeout_s,
             )
             for vehicle_id, target in self.staging_targets.items()
+        )
+
+    def _all_vehicles_landed(self) -> bool:
+        if len(self.vehicle_statuses) < self.config.total_vehicles:
+            return False
+        return all(_landed_ready(status, self.config.telemetry_fresh_timeout_s)
+                   for status in self.vehicle_statuses.values())
+
+    def _count_staged_vehicles(self) -> int:
+        return sum(
+            1
+            for vehicle_id, target in self.staging_targets.items()
+            if vehicle_id in self.vehicle_statuses
+            and _staging_ready(
+                self.vehicle_statuses[vehicle_id],
+                target,
+                self.config.staging_position_tolerance_m,
+                self.config.telemetry_fresh_timeout_s,
+            )
+        )
+
+    def _count_landed_vehicles(self) -> int:
+        return sum(
+            1
+            for status in self.vehicle_statuses.values()
+            if status.vehicle_state == VehicleLevelState.LANDED.value
+        )
+
+    def _takeoff_timed_out(self) -> bool:
+        return (
+            self._takeoff_started_s is not None
+            and self._takeoff_timeout_s is not None
+            and self.now_s() - self._takeoff_started_s > self._takeoff_timeout_s
+        )
+
+    def _land_timed_out(self) -> bool:
+        return (
+            self._land_started_s is not None
+            and self._land_timeout_s is not None
+            and self.now_s() - self._land_started_s > self._land_timeout_s
         )
 
 
@@ -336,11 +440,25 @@ class GroundStationNode(Node):
             ActionServer(self, LandSwarm, 'land', self._execute_land),
         )
 
-    def _execute_takeoff(self, goal_handle):
-        return self._finish_action(
-            goal_handle,
-            self.core.handle_takeoff(goal_handle.request),
-        )
+    async def _execute_takeoff(self, goal_handle):
+        self.core.start_takeoff(goal_handle.request)
+        while rclpy.ok():
+            self.core.republish_staging_setpoints()
+            goal_handle.publish_feedback(self.core.takeoff_feedback())
+            result = self.core.takeoff_result()
+            if result is not None:
+                if result.success:
+                    goal_handle.succeed()
+                else:
+                    goal_handle.abort()
+                return result
+            await asyncio.sleep(0.1)
+
+        result = TakeoffSwarm.Result()
+        result.success = False
+        result.message = 'ROS shutdown before takeoff staging completed'
+        goal_handle.abort()
+        return result
 
     def _execute_move_leader(self, goal_handle):
         return self._finish_action(
@@ -357,8 +475,24 @@ class GroundStationNode(Node):
     def _execute_pause(self, goal_handle):
         return self._finish_action(goal_handle, self.core.handle_pause(goal_handle.request))
 
-    def _execute_land(self, goal_handle):
-        return self._finish_action(goal_handle, self.core.handle_land(goal_handle.request))
+    async def _execute_land(self, goal_handle):
+        self.core.start_land(goal_handle.request)
+        while rclpy.ok():
+            goal_handle.publish_feedback(self.core.land_feedback())
+            result = self.core.land_result()
+            if result is not None:
+                if result.success:
+                    goal_handle.succeed()
+                else:
+                    goal_handle.abort()
+                return result
+            await asyncio.sleep(0.1)
+
+        result = LandSwarm.Result()
+        result.success = False
+        result.message = 'ROS shutdown before land-all completed'
+        goal_handle.abort()
+        return result
 
     def _finish_action(self, goal_handle, outcome):
         goal_handle.publish_feedback(outcome.feedback)
@@ -405,6 +539,15 @@ def _staging_ready(
         and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
         and (status.offboard_available or status.nav_state == 'offboard')
         and _position_close(status, target, tolerance_m)
+    )
+
+
+def _landed_ready(status: VehicleStatus, telemetry_fresh_timeout_s: float) -> bool:
+    # landed completion 也要求新 telemetry，保護上一輪 landed cache 不完成本輪降落 action。
+    return (
+        status.vehicle_state == VehicleLevelState.LANDED.value
+        and isfinite(status.last_telemetry_age_sec)
+        and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
     )
 
 
