@@ -12,7 +12,13 @@ from px4_swarm_control.vehicle_node import (
     VehicleNodeConfig,
     VehicleNodeCore,
 )
-from px4_swarm_interfaces.msg import LeaderGoal, MissionCommand, VehicleSetpoint
+from px4_swarm_interfaces.msg import (
+    FormationMode,
+    LeaderGoal,
+    MissionCommand,
+    VehicleSetpoint,
+    VehicleStatus as SwarmVehicleStatus,
+)
 
 
 class FakePublisher:
@@ -206,7 +212,7 @@ def test_leader_goal_moves_leader_in_following_state():
     assert px4_interface.setpoints == [PositionYawSetpoint(4.0, 5.0, -6.0, 0.7)]
 
 
-def test_follower_ignores_leader_goal_and_keeps_own_hold_setpoint():
+def test_follower_ignores_leader_goal_and_waits_for_leader_status():
     px4_interface = FakePx4Interface()
     core = make_core(
         config=VehicleNodeConfig(
@@ -229,7 +235,92 @@ def test_follower_ignores_leader_goal_and_keeps_own_hold_setpoint():
     core.control_tick()
 
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
-    assert px4_interface.setpoints == [PositionYawSetpoint(-3.0, 4.0, -5.0, 0.0)]
+    assert px4_interface.setpoints == []
+    assert px4_interface.safe_hover_calls == 1
+
+
+def test_follower_left_derives_vee_setpoint_from_fresh_leader_status():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+
+    core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
+    assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 24.0, -5.0, 0.0)]
+
+
+def test_follower_right_derives_vee_setpoint_from_fresh_leader_status():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('vehicle_3', Slot.FOLLOWER_RIGHT),
+        px4_interface=px4_interface,
+    )
+
+    core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
+    assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 16.0, -5.0, 0.0)]
+
+
+def test_follower_uses_current_formation_mode_topic_for_local_offset():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+    mode = FormationMode()
+    mode.mode = FormationMode.VEE
+
+    core.handle_formation_mode(mode)
+    core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
+    core.control_tick()
+
+    assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 24.0, -5.0, 0.0)]
+
+
+def test_follower_holds_when_leader_status_is_stale():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+
+    core.handle_leader_status(
+        leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0, last_telemetry_age_sec=5.0),
+    )
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.HOLDING
+    assert px4_interface.setpoints == []
+    assert px4_interface.safe_hover_calls == 1
+
+
+def test_follower_holds_while_leader_is_only_staged_not_following():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+
+    core.handle_leader_status(
+        leader_status(
+            x=10.0,
+            y=20.0,
+            z=-5.0,
+            yaw=0.0,
+            vehicle_state='staging',
+        ),
+    )
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.HOLDING
+    assert px4_interface.setpoints == []
+    assert px4_interface.safe_hover_calls == 1
 
 
 def test_control_tick_publishes_heartbeat_and_active_setpoint():
@@ -797,3 +888,42 @@ def make_core(config=None, px4_interface=None, status_publisher=None, logger=Non
     if logger is None:
         logger = FakeLogger()
     return VehicleNodeCore(config, px4_interface, status_publisher, logger, now_s=now_s)
+
+
+def follower_config(vehicle_id, slot):
+    target_system = 3 if vehicle_id == 'vehicle_2' else 4
+    return VehicleNodeConfig(
+        role=VehicleRole.FOLLOWER,
+        vehicle_id=vehicle_id,
+        px4_namespace=f'/{vehicle_id}',
+        px4_target_system=target_system,
+        slot=slot,
+        hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
+    )
+
+
+def leader_status(
+    *,
+    x,
+    y,
+    z,
+    yaw,
+    last_telemetry_age_sec=0.1,
+    vehicle_state='following',
+):
+    status = SwarmVehicleStatus()
+    status.vehicle_id = 1
+    status.role = 'leader'
+    status.x = x
+    status.y = y
+    status.z = z
+    status.yaw = yaw
+    status.vx = 0.0
+    status.vy = 0.0
+    status.vz = 0.0
+    status.armed = True
+    status.nav_state = 'offboard'
+    status.offboard_available = True
+    status.last_telemetry_age_sec = last_telemetry_age_sec
+    status.vehicle_state = vehicle_state
+    return status

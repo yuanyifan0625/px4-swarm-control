@@ -12,13 +12,21 @@ from px4_swarm_control.bridge_config import (
     FIRST_VERSION_BY_VEHICLE_ID,
     FIRST_VERSION_VEHICLES,
 )
+from px4_swarm_control.follower_controller import (
+    derive_follower_setpoint,
+    leader_status_is_fresh,
+    leader_status_setpoint,
+)
+from px4_swarm_control.geometry import FormationGeometry
 from px4_swarm_control.models import (
+    FormationMode as InternalFormationMode,
     PositionYawSetpoint,
     Slot,
     VehicleLevelState,
     VehicleRole,
 )
 from px4_swarm_control.px4_vehicle_interface import Px4VehicleInterface
+from px4_swarm_interfaces.msg import FormationMode as SwarmFormationMode
 from px4_swarm_interfaces.msg import LeaderGoal
 from px4_swarm_interfaces.msg import MissionCommand
 from px4_swarm_interfaces.msg import VehicleSetpoint
@@ -44,6 +52,8 @@ class VehicleNodeConfig:
     takeoff_altitude_tolerance_m: float = 1.0
     offboard_warmup_s: float = 1.0
     offboard_mode_retry_s: float = 1.0
+    following_lateral_spacing_m: float = 4.0
+    following_trail_spacing_m: float = 3.0
 
 
 class VehicleNodeCore:
@@ -64,6 +74,8 @@ class VehicleNodeCore:
         self._now_s = now_s or monotonic
         self.vehicle_level_state = VehicleLevelState.IDLE
         self.active_setpoint = config.hold_setpoint
+        self.active_formation = InternalFormationMode.VEE
+        self.leader_status: Optional[SwarmVehicleStatus] = None
         self._leader_goal_active = False
         self._warned_ignored_leader_goal = False
         self._warned_mismatched_vehicle_state = False
@@ -89,6 +101,21 @@ class VehicleNodeCore:
         # 只有 leader 會啟用此旗標，保護 follower 不把 operator goal 當成自己的目標。
         self._leader_goal_active = True
         self.transition_to(VehicleLevelState.FOLLOWING, 'leader goal accepted')
+
+    def handle_leader_status(self, msg: SwarmVehicleStatus) -> None:
+        if self.config.role is not VehicleRole.FOLLOWER:
+            return
+        if int(msg.vehicle_id) != 1:
+            return
+        self.leader_status = msg
+
+    def handle_formation_mode(self, msg: SwarmFormationMode) -> None:
+        if self.config.role is not VehicleRole.FOLLOWER:
+            return
+        try:
+            self.active_formation = InternalFormationMode(msg.mode)
+        except ValueError:
+            self.logger.warning(f'ignored unsupported formation mode: {msg.mode}')
 
     def handle_staging_setpoint(self, msg: VehicleSetpoint) -> None:
         if int(msg.vehicle_id) != vehicle_id_to_uint8(self.config.vehicle_id):
@@ -172,6 +199,15 @@ class VehicleNodeCore:
             self.transition_to(VehicleLevelState.HOLDING, 'telemetry stale')
             self.px4_interface.publish_safe_hover_setpoint()
             return
+        if self.config.role is VehicleRole.FOLLOWER:
+            if not self._update_follower_setpoint():
+                # leader 資訊過期時不追舊 setpoint，保護 follower 不被 stale leader 狀態拖走。
+                self.transition_to(VehicleLevelState.HOLDING, 'leader status stale')
+                self.px4_interface.publish_safe_hover_setpoint()
+                return
+            follower_setpoint_active = True
+        else:
+            follower_setpoint_active = False
 
         # 每個 tick 都補 heartbeat/setpoint，保護 PX4 Offboard mode 不因間隔過久退出。
         self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
@@ -179,10 +215,28 @@ class VehicleNodeCore:
             VehicleLevelState.STAGING
             if self.vehicle_level_state is VehicleLevelState.STAGING
             else VehicleLevelState.FOLLOWING
-            if self._leader_goal_active
+            if self._leader_goal_active or follower_setpoint_active
             else VehicleLevelState.HOLDING
         )
         self.transition_to(next_state, 'active setpoint published')
+
+    def _update_follower_setpoint(self) -> bool:
+        if not leader_status_is_fresh(
+            self.leader_status,
+            self.config.telemetry_timeout_s,
+        ):
+            return False
+        geometry = FormationGeometry(
+            lateral_spacing_m=self.config.following_lateral_spacing_m,
+            trail_spacing_m=self.config.following_trail_spacing_m,
+        )
+        self.active_setpoint = derive_follower_setpoint(
+            leader_status_setpoint(self.leader_status),
+            self.active_formation,
+            self.config.slot,
+            geometry,
+        )
+        return True
 
     def _control_takeoff_to_staging(self, state) -> None:
         if state is None or self.px4_interface.is_telemetry_stale():
@@ -373,6 +427,21 @@ class VehicleNode(Node):
             self.core.handle_staging_setpoint,
             10,
         )
+        self.leader_status_subscription = None
+        self.formation_mode_subscription = None
+        if self.config.role is VehicleRole.FOLLOWER:
+            self.leader_status_subscription = self.create_subscription(
+                SwarmVehicleStatus,
+                '/vehicle_1/status',
+                self.core.handle_leader_status,
+                10,
+            )
+            self.formation_mode_subscription = self.create_subscription(
+                SwarmFormationMode,
+                '/swarm/formation_mode',
+                self.core.handle_formation_mode,
+                10,
+            )
         self.control_timer = self.create_timer(
             1.0 / self.config.control_loop_hz,
             self.core.control_tick,
@@ -394,6 +463,8 @@ class VehicleNode(Node):
         self.declare_parameter('takeoff_altitude_tolerance_m', 1.0)
         self.declare_parameter('offboard_warmup_s', 1.0)
         self.declare_parameter('offboard_mode_retry_s', 1.0)
+        self.declare_parameter('following_lateral_spacing_m', 4.0)
+        self.declare_parameter('following_trail_spacing_m', 3.0)
         self.declare_parameter('hold_x', 0.0)
         self.declare_parameter('hold_y', 0.0)
         self.declare_parameter('hold_z', -2.0)
@@ -412,6 +483,8 @@ class VehicleNode(Node):
             'takeoff_altitude_tolerance_m',
             'offboard_warmup_s',
             'offboard_mode_retry_s',
+            'following_lateral_spacing_m',
+            'following_trail_spacing_m',
             'hold_x',
             'hold_y',
             'hold_z',
@@ -431,6 +504,8 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
     )
     offboard_warmup_s = float(values.get('offboard_warmup_s', 1.0))
     offboard_mode_retry_s = float(values.get('offboard_mode_retry_s', 1.0))
+    following_lateral_spacing_m = float(values.get('following_lateral_spacing_m', 4.0))
+    following_trail_spacing_m = float(values.get('following_trail_spacing_m', 3.0))
 
     if control_loop_hz <= 0.0:
         raise ValueError('control_loop_hz must be positive')
@@ -444,6 +519,10 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         raise ValueError('offboard_warmup_s must be positive')
     if offboard_mode_retry_s <= 0.0:
         raise ValueError('offboard_mode_retry_s must be positive')
+    if following_lateral_spacing_m <= 0.0:
+        raise ValueError('following_lateral_spacing_m must be positive')
+    if following_trail_spacing_m <= 0.0:
+        raise ValueError('following_trail_spacing_m must be positive')
 
     config = VehicleNodeConfig(
         role=role,
@@ -465,6 +544,8 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         takeoff_altitude_tolerance_m=takeoff_altitude_tolerance_m,
         offboard_warmup_s=offboard_warmup_s,
         offboard_mode_retry_s=offboard_mode_retry_s,
+        following_lateral_spacing_m=following_lateral_spacing_m,
+        following_trail_spacing_m=following_trail_spacing_m,
     )
     _validate_first_version_mapping(config)
     return config
