@@ -190,6 +190,48 @@ def test_leader_goal_updates_only_leader_setpoint():
     assert follower_core.logger.warnings == ['follower vehicle_2 ignored leader goal']
 
 
+def test_leader_goal_moves_leader_in_following_state():
+    px4_interface = FakePx4Interface()
+    core = make_core(px4_interface=px4_interface)
+    goal = LeaderGoal()
+    goal.x = 4.0
+    goal.y = 5.0
+    goal.z = -6.0
+    goal.yaw = 0.7
+
+    core.handle_leader_goal(goal)
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
+    assert px4_interface.setpoints == [PositionYawSetpoint(4.0, 5.0, -6.0, 0.7)]
+
+
+def test_follower_ignores_leader_goal_and_keeps_own_hold_setpoint():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=VehicleNodeConfig(
+            role=VehicleRole.FOLLOWER,
+            vehicle_id='vehicle_2',
+            px4_namespace='/vehicle_2',
+            px4_target_system=3,
+            slot=Slot.FOLLOWER_LEFT,
+            hold_setpoint=PositionYawSetpoint(-3.0, 4.0, -5.0, 0.0),
+        ),
+        px4_interface=px4_interface,
+    )
+    goal = LeaderGoal()
+    goal.x = 4.0
+    goal.y = 5.0
+    goal.z = -6.0
+    goal.yaw = 0.7
+
+    core.handle_leader_goal(goal)
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.HOLDING
+    assert px4_interface.setpoints == [PositionYawSetpoint(-3.0, 4.0, -5.0, 0.0)]
+
+
 def test_control_tick_publishes_heartbeat_and_active_setpoint():
     px4_interface = FakePx4Interface()
     core = make_core(px4_interface=px4_interface)
@@ -265,6 +307,108 @@ def test_takeoff_command_waits_until_staging_setpoint_has_arrived():
     assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
 
 
+def test_repeated_takeoff_command_is_idempotent_once_sequence_started():
+    px4_interface = FakePx4Interface()
+    core = make_core(px4_interface=px4_interface)
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0, yaw=0.25))
+    mission = MissionCommand()
+    mission.command = MissionCommand.TAKEOFF
+
+    core.handle_mission_command(mission)
+    core.handle_mission_command(mission)
+
+    assert px4_interface.arm_calls == 1
+    assert px4_interface.takeoff_altitudes == [(5.0, 0.25)]
+    assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
+
+
+def test_republished_staging_setpoint_does_not_leave_active_takeoff_sequence():
+    px4_interface = FakePx4Interface()
+    core = make_core(px4_interface=px4_interface)
+    mission = MissionCommand()
+    mission.command = MissionCommand.TAKEOFF
+
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+    core.handle_mission_command(mission)
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+
+    assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
+    assert px4_interface.arm_calls == 1
+    assert px4_interface.takeoff_altitudes == [(5.0, 0.0)]
+
+
+def test_repeated_takeoff_command_is_ignored_after_airborne_staging_started():
+    px4_interface = FakePx4Interface()
+    core = make_core(px4_interface=px4_interface)
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0, yaw=0.25))
+    mission = MissionCommand()
+    mission.command = MissionCommand.TAKEOFF
+
+    core.handle_mission_command(mission)
+    core._takeoff_to_staging_active = False
+    core.transition_to(VehicleLevelState.STAGING, 'PX4 accepted Offboard')
+    px4_interface.state = vehicle_state(
+        z=-5.0,
+        armed=True,
+        navigation_state='offboard',
+        offboard_available=True,
+        vehicle_level_state=VehicleLevelState.STAGING,
+    )
+    core.handle_mission_command(mission)
+
+    assert px4_interface.arm_calls == 1
+    assert px4_interface.takeoff_altitudes == [(5.0, 0.25)]
+    assert core.vehicle_level_state is VehicleLevelState.STAGING
+
+
+def test_takeoff_retries_px4_takeoff_while_vehicle_still_grounded():
+    clock = [10.0]
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            z=-0.05,
+            armed=False,
+            navigation_state='auto_takeoff',
+            landed=True,
+        ),
+    )
+    core = make_core(px4_interface=px4_interface, now_s=lambda: clock[0])
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+    mission = MissionCommand()
+    mission.command = MissionCommand.TAKEOFF
+    core.handle_mission_command(mission)
+
+    clock[0] = 10.5
+    core.control_tick()
+    clock[0] = 11.1
+    core.control_tick()
+
+    assert px4_interface.arm_calls == 2
+    assert px4_interface.takeoff_altitudes == [(5.0, 0.0), (5.0, 0.0)]
+    assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
+
+
+def test_new_takeoff_after_land_waits_for_fresh_staging_setpoint():
+    px4_interface = FakePx4Interface()
+    core = make_core(px4_interface=px4_interface)
+    takeoff = MissionCommand()
+    takeoff.command = MissionCommand.TAKEOFF
+    land = MissionCommand()
+    land.command = MissionCommand.LAND
+
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0, yaw=0.25))
+    core.handle_mission_command(takeoff)
+    core.handle_mission_command(land)
+    core.handle_mission_command(takeoff)
+
+    assert px4_interface.takeoff_altitudes == [(5.0, 0.25)]
+    assert core.vehicle_level_state is VehicleLevelState.ARMING
+
+    core.handle_staging_setpoint(staging_setpoint(z=-6.0, yaw=0.5))
+
+    assert px4_interface.takeoff_altitudes == [(5.0, 0.25), (6.0, 0.5)]
+    assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
+
+
 def test_takeoff_waits_for_altitude_before_offboard_warmup():
     px4_interface = FakePx4Interface(
         state=vehicle_state(z=-2.0, armed=True, navigation_state='auto_takeoff'),
@@ -332,6 +476,28 @@ def test_takeoff_retries_offboard_mode_until_px4_accepts():
     assert px4_interface.offboard_mode_calls == 2
 
 
+def test_takeoff_does_not_treat_offboard_available_as_mode_accepted():
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            z=-4.8,
+            armed=True,
+            navigation_state='auto_takeoff',
+            offboard_available=True,
+        ),
+    )
+    core = make_core(px4_interface=px4_interface)
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+    mission = MissionCommand()
+    mission.command = MissionCommand.TAKEOFF
+    core.handle_mission_command(mission)
+
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
+    assert px4_interface.heartbeats == 1
+    assert px4_interface.setpoints == [PositionYawSetpoint(0.0, 0.0, -5.0, 0.0)]
+
+
 def test_staging_control_starts_only_after_px4_reports_offboard_accepted():
     px4_interface = FakePx4Interface(
         state=vehicle_state(
@@ -358,6 +524,28 @@ def test_staging_control_starts_only_after_px4_reports_offboard_accepted():
     assert px4_interface.heartbeats == 2
     assert px4_interface.setpoints[-1] == PositionYawSetpoint(0.0, 0.0, -5.0, 0.0)
     assert core.vehicle_level_state is VehicleLevelState.STAGING
+
+
+def test_takeoff_does_not_accept_offboard_while_px4_still_reports_landed():
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            z=-0.05,
+            armed=False,
+            navigation_state='offboard',
+            offboard_available=True,
+            landed=True,
+        ),
+    )
+    core = make_core(px4_interface=px4_interface)
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+    mission = MissionCommand()
+    mission.command = MissionCommand.TAKEOFF
+    core.handle_mission_command(mission)
+
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.TAKING_OFF
+    assert px4_interface.setpoints == []
 
 
 def test_vehicle_ignores_staging_setpoint_for_another_vehicle():

@@ -128,24 +128,227 @@ def test_takeoff_action_result_times_out_when_staging_never_completes():
     assert 'timed out' in result.message
 
 
-def test_move_leader_action_publishes_world_frame_leader_goal():
+def test_move_leader_action_publishes_world_frame_leader_goal_without_follower_targets():
     core, publishers, _ = make_core()
     request = MoveLeader.Goal()
     request.x = 1.0
     request.y = 2.0
     request.z = -3.0
     request.yaw = 0.75
+    request.position_tolerance_m = 0.5
+    request.yaw_tolerance_rad = 0.2
     request.timeout_sec = 12.0
 
-    outcome = core.handle_move_leader(request)
+    feedback = core.start_move_leader(request)
 
     assert core.mission_state is MissionState.FOLLOWING
-    assert outcome.result.success is True
-    assert outcome.feedback.current_state == 'following'
+    assert feedback.current_state == 'following'
+    assert core.move_leader_result() is None
     msg = publishers.leader_goal.messages[-1]
     assert isinstance(msg, LeaderGoal)
     assert msg.frame_id == 'world'
     assert (msg.x, msg.y, msg.z, msg.yaw) == (1.0, 2.0, -3.0, 0.75)
+    assert publishers.vehicle_setpoints[1].messages == []
+    assert publishers.vehicle_setpoints[2].messages == []
+    assert publishers.vehicle_setpoints[3].messages == []
+
+
+def test_move_leader_result_requires_fresh_leader_status_within_tolerance():
+    core, _, _ = make_core()
+    request = MoveLeader.Goal()
+    request.x = 1.0
+    request.y = 2.0
+    request.z = -3.0
+    request.yaw = 0.75
+    request.position_tolerance_m = 0.5
+    request.yaw_tolerance_rad = 0.2
+    request.timeout_sec = 12.0
+    core.start_move_leader(request)
+
+    stale_leader = vehicle_status(
+        1,
+        x=1.0,
+        y=2.0,
+        z=-3.0,
+        yaw=0.75,
+        last_telemetry_age_sec=5.0,
+    )
+    core.handle_vehicle_status(stale_leader)
+    assert core.move_leader_result() is None
+
+    follower_at_goal = vehicle_status(
+        2,
+        x=1.0,
+        y=2.0,
+        z=-3.0,
+        yaw=0.75,
+        last_telemetry_age_sec=0.1,
+    )
+    core.handle_vehicle_status(follower_at_goal)
+    assert core.move_leader_result() is None
+
+    leader_far = vehicle_status(
+        1,
+        x=1.4,
+        y=2.4,
+        z=-3.4,
+        yaw=1.2,
+        last_telemetry_age_sec=0.1,
+    )
+    core.handle_vehicle_status(leader_far)
+    feedback = core.move_leader_feedback()
+    assert feedback.remaining_distance_m > 0.0
+    assert feedback.yaw_error_rad > 0.2
+    assert core.move_leader_result() is None
+
+    leader_reached = vehicle_status(
+        1,
+        x=1.1,
+        y=1.9,
+        z=-3.1,
+        yaw=0.8,
+        last_telemetry_age_sec=0.1,
+    )
+    core.handle_vehicle_status(leader_reached)
+
+    result = core.move_leader_result()
+    assert result.success is True
+    assert result.message == 'leader reached target'
+
+
+def test_move_leader_result_requires_leader_armed_and_offboard():
+    core, _, _ = make_core()
+    request = MoveLeader.Goal()
+    request.x = 1.0
+    request.y = 2.0
+    request.z = -3.0
+    request.yaw = 0.75
+    request.position_tolerance_m = 0.5
+    request.yaw_tolerance_rad = 0.2
+    request.timeout_sec = 12.0
+    core.start_move_leader(request)
+
+    disarmed_at_goal = vehicle_status(
+        1,
+        x=1.0,
+        y=2.0,
+        z=-3.0,
+        yaw=0.75,
+        armed=False,
+        nav_state='offboard',
+    )
+    core.handle_vehicle_status(disarmed_at_goal)
+    assert core.move_leader_result() is None
+
+    auto_at_goal = vehicle_status(
+        1,
+        x=1.0,
+        y=2.0,
+        z=-3.0,
+        yaw=0.75,
+        armed=True,
+        nav_state='auto_loiter',
+    )
+    core.handle_vehicle_status(auto_at_goal)
+    assert core.move_leader_result() is None
+
+    offboard_at_goal = vehicle_status(
+        1,
+        x=1.0,
+        y=2.0,
+        z=-3.0,
+        yaw=0.75,
+        armed=True,
+        nav_state='offboard',
+    )
+    core.handle_vehicle_status(offboard_at_goal)
+
+    result = core.move_leader_result()
+    assert result.success is True
+
+
+def test_move_leader_rejects_non_finite_goal_and_non_positive_tolerance():
+    core, publishers, _ = make_core()
+    request = MoveLeader.Goal()
+    request.x = float('nan')
+    request.y = 2.0
+    request.z = -3.0
+    request.yaw = 0.75
+    request.position_tolerance_m = 0.5
+    request.yaw_tolerance_rad = 0.2
+    request.timeout_sec = 12.0
+
+    rejected = core.start_move_leader(request)
+
+    assert rejected.current_state == 'error'
+    result = core.move_leader_result()
+    assert result.success is False
+    assert 'invalid leader goal' in result.message
+    assert publishers.leader_goal.messages == []
+
+    core, publishers, _ = make_core()
+    request.x = 1.0
+    request.position_tolerance_m = 0.0
+
+    rejected = core.start_move_leader(request)
+
+    assert rejected.current_state == 'error'
+    result = core.move_leader_result()
+    assert result.success is False
+    assert 'invalid leader goal' in result.message
+    assert publishers.leader_goal.messages == []
+
+
+def test_move_leader_result_times_out_before_leader_reaches_goal():
+    clock = [10.0]
+    core, _, _ = make_core(now_s=lambda: clock[0])
+    request = MoveLeader.Goal()
+    request.x = 1.0
+    request.y = 2.0
+    request.z = -3.0
+    request.yaw = 0.75
+    request.position_tolerance_m = 0.5
+    request.yaw_tolerance_rad = 0.2
+    request.timeout_sec = 2.0
+    core.start_move_leader(request)
+
+    clock[0] = 12.1
+
+    result = core.move_leader_result()
+    assert result.success is False
+    assert 'timed out' in result.message
+
+
+def test_takeoff_and_land_clear_pending_move_leader_goal_republish():
+    core, publishers, _ = make_core()
+    move = MoveLeader.Goal()
+    move.x = 1.0
+    move.y = 2.0
+    move.z = -3.0
+    move.yaw = 0.75
+    move.position_tolerance_m = 0.5
+    move.yaw_tolerance_rad = 0.2
+    move.timeout_sec = 12.0
+    core.start_move_leader(move)
+    assert len(publishers.leader_goal.messages) == 1
+
+    takeoff = TakeoffSwarm.Goal()
+    takeoff.altitude_m = 5.0
+    takeoff.timeout_sec = 30.0
+    core.start_takeoff(takeoff)
+    core.republish_leader_goal()
+
+    assert len(publishers.leader_goal.messages) == 1
+
+    core.start_move_leader(move)
+    assert len(publishers.leader_goal.messages) == 2
+
+    land = LandSwarm.Goal()
+    land.timeout_sec = 30.0
+    core.start_land(land)
+    core.republish_leader_goal()
+
+    assert len(publishers.leader_goal.messages) == 2
 
 
 def test_change_formation_accepts_supported_mode_and_rejects_unknown_mode():
@@ -356,6 +559,22 @@ def test_republish_staging_setpoints_resends_current_targets_for_all_vehicles():
     ) == (-3.0, 4.0, -5.0)
 
 
+def test_republish_takeoff_request_resends_staging_targets_and_takeoff_command():
+    core, publishers, _ = make_core()
+    request = TakeoffSwarm.Goal()
+    request.altitude_m = 5.0
+    request.timeout_sec = 30.0
+    core.start_takeoff(request)
+
+    core.republish_takeoff_request()
+
+    assert len(publishers.vehicle_setpoints[1].messages) == 2
+    assert len(publishers.vehicle_setpoints[2].messages) == 2
+    assert len(publishers.vehicle_setpoints[3].messages) == 2
+    assert len(publishers.mission_command.messages) == 2
+    assert publishers.mission_command.messages[-1].command == MissionCommand.TAKEOFF
+
+
 def test_vehicle_status_detects_all_staged_and_logs_progress_once():
     core, _, logger = make_core()
     request = TakeoffSwarm.Goal()
@@ -444,11 +663,12 @@ def test_ground_station_node_starts_under_swarm_namespace_with_actions(monkeypat
     action_servers = []
 
     class FakeActionServer:
-        def __init__(self, node, action_type, name, execute_callback):
+        def __init__(self, node, action_type, name, execute_callback, **kwargs):
             self.node = node
             self.action_type = action_type
             self.name = name
             self.execute_callback = execute_callback
+            self.callback_group = kwargs.get('callback_group')
             action_servers.append(self)
 
     monkeypatch.setattr(ground_station_node, 'ActionServer', FakeActionServer)
@@ -463,6 +683,7 @@ def test_ground_station_node_starts_under_swarm_namespace_with_actions(monkeypat
             'pause',
             'land',
         ]
+        assert all(server.callback_group is node.callback_group for server in action_servers)
         assert node.resolve_topic_name('mission_command') == '/swarm/mission_command'
         assert node.resolve_topic_name('leader_goal') == '/swarm/leader_goal'
         assert node.resolve_topic_name('formation_mode') == '/swarm/formation_mode'
@@ -491,3 +712,28 @@ def publish_staged_statuses(core):
         status.last_telemetry_age_sec = 0.1
         status.vehicle_state = 'staging'
         core.handle_vehicle_status(status)
+
+
+def vehicle_status(
+    vehicle_id,
+    *,
+    x=0.0,
+    y=0.0,
+    z=-5.0,
+    yaw=0.0,
+    armed=True,
+    nav_state='offboard',
+    last_telemetry_age_sec=0.1,
+):
+    status = VehicleStatus()
+    status.vehicle_id = vehicle_id
+    status.x = x
+    status.y = y
+    status.z = z
+    status.yaw = yaw
+    status.armed = armed
+    status.nav_state = nav_state
+    status.offboard_available = True
+    status.last_telemetry_age_sec = last_telemetry_age_sec
+    status.vehicle_state = 'staging'
+    return status

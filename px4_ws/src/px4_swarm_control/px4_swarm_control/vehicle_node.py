@@ -64,11 +64,14 @@ class VehicleNodeCore:
         self._now_s = now_s or monotonic
         self.vehicle_level_state = VehicleLevelState.IDLE
         self.active_setpoint = config.hold_setpoint
+        self._leader_goal_active = False
         self._warned_ignored_leader_goal = False
         self._warned_mismatched_vehicle_state = False
         self._takeoff_to_staging_active = False
+        self._takeoff_command_sent_for_staging = False
         self._pending_takeoff_until_staging = False
         self._staging_setpoint_received = False
+        self._last_takeoff_command_request_s: Optional[float] = None
         self._offboard_warmup_started_s: Optional[float] = None
         self._last_offboard_mode_request_s: Optional[float] = None
         self._sync_interface_state()
@@ -83,15 +86,19 @@ class VehicleNodeCore:
             return
 
         self.active_setpoint = PositionYawSetpoint(msg.x, msg.y, msg.z, msg.yaw)
-        self.transition_to(VehicleLevelState.HOLDING, 'leader goal accepted')
+        # 只有 leader 會啟用此旗標，保護 follower 不把 operator goal 當成自己的目標。
+        self._leader_goal_active = True
+        self.transition_to(VehicleLevelState.FOLLOWING, 'leader goal accepted')
 
     def handle_staging_setpoint(self, msg: VehicleSetpoint) -> None:
         if int(msg.vehicle_id) != vehicle_id_to_uint8(self.config.vehicle_id):
             return
         # 只接受自己的 staging 目標，保護多機共用 topic 流程下不追錯飛機位置。
         self.active_setpoint = PositionYawSetpoint(msg.x, msg.y, msg.z, msg.yaw)
-        self.transition_to(VehicleLevelState.STAGING, 'staging setpoint accepted')
+        self._leader_goal_active = False
         self._staging_setpoint_received = True
+        if not self._takeoff_to_staging_active:
+            self.transition_to(VehicleLevelState.STAGING, 'staging setpoint accepted')
         if self._pending_takeoff_until_staging:
             self._pending_takeoff_until_staging = False
             self._start_takeoff_without_qgc()
@@ -101,12 +108,18 @@ class VehicleNodeCore:
             self._start_takeoff_without_qgc()
             return
         if msg.command == MissionCommand.LAND:
+            self._leader_goal_active = False
             self._takeoff_to_staging_active = False
+            self._takeoff_command_sent_for_staging = False
             self._pending_takeoff_until_staging = False
+            # 降落代表任務輪次結束，清掉 staging latch 以保護下一輪不吃上一輪目標。
+            self._staging_setpoint_received = False
+            self._last_takeoff_command_request_s = None
             self.px4_interface.land()
             self.transition_to(VehicleLevelState.LANDING, 'land command accepted')
             return
         if msg.command == MissionCommand.PAUSE:
+            self._leader_goal_active = False
             self.transition_to(VehicleLevelState.PAUSED, 'pause command accepted')
             self.px4_interface.publish_safe_hover_setpoint()
             return
@@ -114,6 +127,12 @@ class VehicleNodeCore:
             self.transition_to(VehicleLevelState.HOLDING, 'resume command accepted')
 
     def _start_takeoff_without_qgc(self) -> None:
+        if self._takeoff_to_staging_active:
+            # TAKEOFF 會在 action 等待期間重送，這裡保護 PX4 不被重複 arm/takeoff 指令洗版。
+            return
+        if self._takeoff_command_sent_for_staging:
+            # 同一輪任務已送過 PX4 takeoff 後，忽略 retry 以保護起飛初期 landed telemetry 抖動不重啟流程。
+            return
         if not self._staging_setpoint_received:
             # TAKEOFF 可能比 staging topic 先到，等待目標可避免用 hold altitude 起飛到錯高度。
             self._pending_takeoff_until_staging = True
@@ -126,12 +145,7 @@ class VehicleNodeCore:
         self._takeoff_to_staging_active = True
         self._offboard_warmup_started_s = None
         self._last_offboard_mode_request_s = None
-        # 先讓 PX4 自己管理起飛，保護 Offboard 不會在尚未離地時被太早拒絕。
-        self.px4_interface.arm()
-        self.px4_interface.takeoff(
-            altitude_m=abs(self.active_setpoint.z),
-            yaw=self.active_setpoint.yaw,
-        )
+        self._send_takeoff_command_to_px4()
         self.transition_to(VehicleLevelState.TAKING_OFF, 'takeoff command accepted')
         self.logger.info(
             '不依賴 QGC：先用 PX4 NAV_TAKEOFF 到安全高度，'
@@ -164,6 +178,8 @@ class VehicleNodeCore:
         next_state = (
             VehicleLevelState.STAGING
             if self.vehicle_level_state is VehicleLevelState.STAGING
+            else VehicleLevelState.FOLLOWING
+            if self._leader_goal_active
             else VehicleLevelState.HOLDING
         )
         self.transition_to(next_state, 'active setpoint published')
@@ -178,6 +194,7 @@ class VehicleNodeCore:
             self.transition_to(VehicleLevelState.STAGING, 'PX4 accepted Offboard')
             return
         if not self._takeoff_altitude_reached(state):
+            self._retry_takeoff_if_still_grounded(state)
             return
 
         # 高度達標後才連續送 heartbeat/setpoint，保護 PX4 Offboard 切換有足夠 warmup。
@@ -197,13 +214,42 @@ class VehicleNodeCore:
             self.px4_interface.set_offboard_mode()
             self._last_offboard_mode_request_s = now_s
 
+    def _send_takeoff_command_to_px4(self) -> None:
+        # 先讓 PX4 自己管理起飛，保護 Offboard 不會在尚未離地時被太早拒絕。
+        self.px4_interface.arm()
+        self.px4_interface.takeoff(
+            altitude_m=abs(self.active_setpoint.z),
+            yaw=self.active_setpoint.yaw,
+        )
+        self._takeoff_command_sent_for_staging = True
+        self._last_takeoff_command_request_s = self._now_s()
+
+    def _retry_takeoff_if_still_grounded(self, state) -> None:
+        if state.armed and not getattr(state, 'landed', False):
+            return
+        now_s = self._now_s()
+        if (
+            self._last_takeoff_command_request_s is not None
+            and now_s - self._last_takeoff_command_request_s
+            < self.config.offboard_mode_retry_s
+        ):
+            return
+        # PX4 在落地後可能短暫忽略第一個 takeoff，低頻重送保護一次 action 能完成。
+        self._send_takeoff_command_to_px4()
+
     def _takeoff_altitude_reached(self, state) -> bool:
         return state.position[2] <= (
             self.active_setpoint.z + self.config.takeoff_altitude_tolerance_m
         )
 
     def _offboard_accepted(self, state) -> bool:
-        return state.offboard_available or state.navigation_state == 'offboard'
+        if state.navigation_state != 'offboard':
+            return False
+        if getattr(state, 'landed', False) and state.position[2] > -0.5:
+            # PX4 可能短暫回報 Offboard 但仍未離地，這裡保護 staging 不被 landed telemetry 打回。
+            return False
+        # Offboard 要等到起飛高度達標才承認，保護 staging 水平移動不在地面附近開始。
+        return self._takeoff_altitude_reached(state)
 
     def _state_is_landed(self, state) -> bool:
         if state is None or not getattr(state, 'landed', False):

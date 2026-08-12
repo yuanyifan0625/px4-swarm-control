@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from math import isfinite
+from math import pi
+from math import sqrt
+from time import sleep
 from time import monotonic
 from typing import Callable, Dict
 
@@ -32,7 +34,9 @@ from px4_swarm_interfaces.msg import (
 )
 import rclpy
 from rclpy.action import ActionServer
+from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 
@@ -91,23 +95,33 @@ class GroundStationCore:
         self._staging_complete_logged = False
         self._takeoff_started_s: float | None = None
         self._takeoff_timeout_s: float | None = None
+        self._takeoff_reason: str | None = None
+        self._leader_goal: PositionYawSetpoint | None = None
+        self._leader_goal_message: LeaderGoal | None = None
+        self._move_leader_started_s: float | None = None
+        self._move_leader_timeout_s: float | None = None
+        self._move_leader_position_tolerance_m: float | None = None
+        self._move_leader_yaw_tolerance_rad: float | None = None
+        self._move_leader_rejection: str | None = None
         self._land_started_s: float | None = None
         self._land_timeout_s: float | None = None
 
     def start_takeoff(self, request: TakeoffSwarm.Goal):
         # 新任務先清掉舊 status，保護 action completion 不被上一輪 landed/staging 污染。
         self.vehicle_statuses = {}
+        self._clear_move_leader_state()
         self._takeoff_started_s = self.now_s()
         self._takeoff_timeout_s = max(float(request.timeout_sec), 0.0)
+        self._takeoff_reason = (
+            f'altitude_m={request.altitude_m:.2f} timeout_sec={request.timeout_sec:.2f}'
+        )
         self._land_started_s = None
         self._land_timeout_s = None
         self._transition_to(MissionState.TAKING_OFF, 'takeoff action accepted')
         self._publish_staging_setpoints(request.altitude_m)
-        mission = self._mission_command(
-            MissionCommand.TAKEOFF,
-            f'altitude_m={request.altitude_m:.2f} timeout_sec={request.timeout_sec:.2f}',
+        self.publishers.mission_command.publish(
+            self._mission_command(MissionCommand.TAKEOFF, self._takeoff_reason),
         )
-        self.publishers.mission_command.publish(mission)
         return self.takeoff_feedback()
 
     def takeoff_feedback(self) -> TakeoffSwarm.Feedback:
@@ -135,7 +149,21 @@ class GroundStationCore:
             return result
         return None
 
-    def handle_move_leader(self, request: MoveLeader.Goal):
+    def start_move_leader(self, request: MoveLeader.Goal):
+        self.vehicle_statuses = {}
+        self._move_leader_started_s = self.now_s()
+        self._move_leader_timeout_s = max(float(request.timeout_sec), 0.0)
+        self._move_leader_position_tolerance_m = float(request.position_tolerance_m)
+        self._move_leader_yaw_tolerance_rad = float(request.yaw_tolerance_rad)
+        self._move_leader_rejection = None
+        self._leader_goal = None
+        self._leader_goal_message = None
+
+        if not self._valid_move_leader_request(request):
+            self._move_leader_rejection = 'invalid leader goal'
+            self._transition_to(MissionState.ERROR, self._move_leader_rejection)
+            return self.move_leader_feedback()
+
         self._transition_to(MissionState.FOLLOWING, 'leader goal accepted')
         msg = LeaderGoal()
         msg.stamp = self.now_stamp()
@@ -144,17 +172,40 @@ class GroundStationCore:
         msg.y = request.y
         msg.z = request.z
         msg.yaw = request.yaw
+        self._leader_goal = PositionYawSetpoint(request.x, request.y, request.z, request.yaw)
+        self._leader_goal_message = msg
         self.publishers.leader_goal.publish(msg)
+        return self.move_leader_feedback()
 
+    def republish_leader_goal(self) -> None:
+        if self._leader_goal_message is None:
+            return
+        # MoveLeader 等待期間重送 leader goal，保護 late subscriber 不錯過 single-shot 目標。
+        self.publishers.leader_goal.publish(self._leader_goal_message)
+
+    def move_leader_feedback(self) -> MoveLeader.Feedback:
         feedback = MoveLeader.Feedback()
         feedback.current_state = self.mission_state.value
-        feedback.remaining_distance_m = 0.0
-        feedback.yaw_error_rad = 0.0
+        feedback.remaining_distance_m = self._leader_remaining_distance_m()
+        feedback.yaw_error_rad = self._leader_yaw_error_rad()
+        return feedback
 
+    def move_leader_result(self) -> MoveLeader.Result | None:
         result = MoveLeader.Result()
-        result.success = True
-        result.message = 'leader goal accepted and published'
-        return ActionOutcome(result=result, feedback=feedback)
+        if self._move_leader_rejection is not None:
+            result.success = False
+            result.message = self._move_leader_rejection
+            return result
+        if self._leader_goal_reached():
+            result.success = True
+            result.message = 'leader reached target'
+            return result
+        if self._move_leader_timed_out():
+            self._transition_to(MissionState.ERROR, 'leader movement timed out')
+            result.success = False
+            result.message = 'leader movement timed out'
+            return result
+        return None
 
     def handle_change_formation(self, request: ChangeFormation.Goal):
         if request.formation_mode not in _supported_formation_modes():
@@ -213,10 +264,12 @@ class GroundStationCore:
     def start_land(self, request: LandSwarm.Goal):
         # LandSwarm 只看本輪降落後的新 status，避免上一輪 landed cache 直接完成 action。
         self.vehicle_statuses = {}
+        self._clear_move_leader_state()
         self._land_started_s = self.now_s()
         self._land_timeout_s = max(float(request.timeout_sec), 0.0)
         self._takeoff_started_s = None
         self._takeoff_timeout_s = None
+        self._takeoff_reason = None
         self._transition_to(MissionState.LANDING, 'land-all action accepted')
         self.publishers.mission_command.publish(
             self._mission_command(
@@ -317,6 +370,15 @@ class GroundStationCore:
         for vehicle_id, target in self.staging_targets.items():
             self._publish_vehicle_setpoint(vehicle_id, target)
 
+    def republish_takeoff_request(self) -> None:
+        self.republish_staging_setpoints()
+        if self._takeoff_reason is None:
+            return
+        # 等待起飛完成期間重送任務命令，保護 vehicle node 不因 topic timing 錯過 TAKEOFF。
+        self.publishers.mission_command.publish(
+            self._mission_command(MissionCommand.TAKEOFF, self._takeoff_reason),
+        )
+
     def _publish_vehicle_setpoint(
         self,
         vehicle_id: int,
@@ -387,12 +449,94 @@ class GroundStationCore:
             and self.now_s() - self._land_started_s > self._land_timeout_s
         )
 
+    def _valid_move_leader_request(self, request: MoveLeader.Goal) -> bool:
+        values = (
+            request.x,
+            request.y,
+            request.z,
+            request.yaw,
+            float(request.position_tolerance_m),
+            float(request.yaw_tolerance_rad),
+        )
+        # Operator goal 必須是有限 world-frame 數值，保護 action 不把 NaN/Inf 送進 Offboard setpoint。
+        return (
+            all(isfinite(value) for value in values)
+            and float(request.position_tolerance_m) > 0.0
+            and float(request.yaw_tolerance_rad) > 0.0
+        )
+
+    def _leader_status(self) -> VehicleStatus | None:
+        return self.vehicle_statuses.get(1)
+
+    def _fresh_leader_status(self) -> VehicleStatus | None:
+        status = self._leader_status()
+        if status is None:
+            return None
+        if (
+            not isfinite(status.last_telemetry_age_sec)
+            or status.last_telemetry_age_sec > self.config.telemetry_fresh_timeout_s
+        ):
+            return None
+        # MoveLeader 完成要確認 PX4 仍在 Offboard 控制中，保護 landed/auto 狀態不誤判成功。
+        if not status.armed or status.nav_state != 'offboard':
+            return None
+        return status
+
+    def _leader_remaining_distance_m(self) -> float:
+        status = self._fresh_leader_status()
+        if status is None or self._leader_goal is None:
+            return float('inf')
+        return sqrt(
+            (status.x - self._leader_goal.x) ** 2
+            + (status.y - self._leader_goal.y) ** 2
+            + (status.z - self._leader_goal.z) ** 2,
+        )
+
+    def _leader_yaw_error_rad(self) -> float:
+        status = self._fresh_leader_status()
+        if status is None or self._leader_goal is None:
+            return float('inf')
+        return _yaw_error_rad(status.yaw, self._leader_goal.yaw)
+
+    def _leader_goal_reached(self) -> bool:
+        if (
+            self._leader_goal is None
+            or self._move_leader_position_tolerance_m is None
+            or self._move_leader_yaw_tolerance_rad is None
+        ):
+            return False
+        # 完成條件只看 fresh leader status，保護 MoveLeader 不被 follower 或舊 telemetry 提前完成。
+        return (
+            self._leader_remaining_distance_m()
+            <= self._move_leader_position_tolerance_m
+            and self._leader_yaw_error_rad() <= self._move_leader_yaw_tolerance_rad
+        )
+
+    def _move_leader_timed_out(self) -> bool:
+        return (
+            self._move_leader_started_s is not None
+            and self._move_leader_timeout_s is not None
+            and self.now_s() - self._move_leader_started_s
+            > self._move_leader_timeout_s
+        )
+
+    def _clear_move_leader_state(self) -> None:
+        # 任務階段切換時清掉 leader goal，保護 takeoff/land 不被上一個 MoveLeader 重送干擾。
+        self._leader_goal = None
+        self._leader_goal_message = None
+        self._move_leader_started_s = None
+        self._move_leader_timeout_s = None
+        self._move_leader_position_tolerance_m = None
+        self._move_leader_yaw_tolerance_rad = None
+        self._move_leader_rejection = None
+
 
 class GroundStationNode(Node):
     """ROS 2 node exposing operator actions under `/swarm`."""
 
     def __init__(self) -> None:
         super().__init__('ground_station_node', namespace='/swarm')
+        self.callback_group = ReentrantCallbackGroup()
         self.config = default_ground_station_config()
         publishers = GroundStationPublishers(
             mission_command=self.create_publisher(MissionCommand, 'mission_command', 10),
@@ -424,26 +568,52 @@ class GroundStationNode(Node):
                 f'{vehicle.namespace}/status',
                 self.core.handle_vehicle_status,
                 10,
+                callback_group=self.callback_group,
             )
             for vehicle in FIRST_VERSION_VEHICLES
         ]
         self.action_servers = (
-            ActionServer(self, TakeoffSwarm, 'takeoff', self._execute_takeoff),
-            ActionServer(self, MoveLeader, 'move_leader', self._execute_move_leader),
+            ActionServer(
+                self,
+                TakeoffSwarm,
+                'takeoff',
+                self._execute_takeoff,
+                callback_group=self.callback_group,
+            ),
+            ActionServer(
+                self,
+                MoveLeader,
+                'move_leader',
+                self._execute_move_leader,
+                callback_group=self.callback_group,
+            ),
             ActionServer(
                 self,
                 ChangeFormation,
                 'change_formation',
                 self._execute_change_formation,
+                callback_group=self.callback_group,
             ),
-            ActionServer(self, PauseSwarm, 'pause', self._execute_pause),
-            ActionServer(self, LandSwarm, 'land', self._execute_land),
+            ActionServer(
+                self,
+                PauseSwarm,
+                'pause',
+                self._execute_pause,
+                callback_group=self.callback_group,
+            ),
+            ActionServer(
+                self,
+                LandSwarm,
+                'land',
+                self._execute_land,
+                callback_group=self.callback_group,
+            ),
         )
 
-    async def _execute_takeoff(self, goal_handle):
+    def _execute_takeoff(self, goal_handle):
         self.core.start_takeoff(goal_handle.request)
         while rclpy.ok():
-            self.core.republish_staging_setpoints()
+            self.core.republish_takeoff_request()
             goal_handle.publish_feedback(self.core.takeoff_feedback())
             result = self.core.takeoff_result()
             if result is not None:
@@ -452,7 +622,7 @@ class GroundStationNode(Node):
                 else:
                     goal_handle.abort()
                 return result
-            await asyncio.sleep(0.1)
+            sleep(0.1)
 
         result = TakeoffSwarm.Result()
         result.success = False
@@ -461,10 +631,24 @@ class GroundStationNode(Node):
         return result
 
     def _execute_move_leader(self, goal_handle):
-        return self._finish_action(
-            goal_handle,
-            self.core.handle_move_leader(goal_handle.request),
-        )
+        self.core.start_move_leader(goal_handle.request)
+        while rclpy.ok():
+            self.core.republish_leader_goal()
+            goal_handle.publish_feedback(self.core.move_leader_feedback())
+            result = self.core.move_leader_result()
+            if result is not None:
+                if result.success:
+                    goal_handle.succeed()
+                else:
+                    goal_handle.abort()
+                return result
+            sleep(0.1)
+
+        result = MoveLeader.Result()
+        result.success = False
+        result.message = 'ROS shutdown before leader reached target'
+        goal_handle.abort()
+        return result
 
     def _execute_change_formation(self, goal_handle):
         return self._finish_action(
@@ -475,7 +659,7 @@ class GroundStationNode(Node):
     def _execute_pause(self, goal_handle):
         return self._finish_action(goal_handle, self.core.handle_pause(goal_handle.request))
 
-    async def _execute_land(self, goal_handle):
+    def _execute_land(self, goal_handle):
         self.core.start_land(goal_handle.request)
         while rclpy.ok():
             goal_handle.publish_feedback(self.core.land_feedback())
@@ -486,7 +670,7 @@ class GroundStationNode(Node):
                 else:
                     goal_handle.abort()
                 return result
-            await asyncio.sleep(0.1)
+            sleep(0.1)
 
         result = LandSwarm.Result()
         result.success = False
@@ -526,6 +710,11 @@ def _position_close(
     )
 
 
+def _yaw_error_rad(current_yaw: float, target_yaw: float) -> float:
+    wrapped = (current_yaw - target_yaw + pi) % (2.0 * pi) - pi
+    return abs(wrapped)
+
+
 def _staging_ready(
     status: VehicleStatus,
     target: PositionYawSetpoint,
@@ -537,7 +726,7 @@ def _staging_ready(
         status.armed
         and isfinite(status.last_telemetry_age_sec)
         and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
-        and (status.offboard_available or status.nav_state == 'offboard')
+        and status.nav_state == 'offboard'
         and _position_close(status, target, tolerance_m)
     )
 
@@ -554,11 +743,14 @@ def _landed_ready(status: VehicleStatus, telemetry_fresh_timeout_s: float) -> bo
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = GroundStationNode()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
