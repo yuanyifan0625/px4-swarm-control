@@ -12,7 +12,12 @@ from typing import Callable, Dict
 
 from builtin_interfaces.msg import Time
 from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES
-from px4_swarm_control.geometry import FormationGeometry, staging_setpoint
+from px4_swarm_control.geometry import (
+    body_offset_to_world,
+    formation_body_offset,
+    FormationGeometry,
+    staging_setpoint,
+)
 from px4_swarm_control.models import FormationMode as InternalFormationMode
 from px4_swarm_control.models import MissionState
 from px4_swarm_control.models import PositionYawSetpoint
@@ -49,6 +54,10 @@ class GroundStationConfig:
     staging_lateral_spacing_m: float = 4.0
     staging_trail_spacing_m: float = 3.0
     staging_position_tolerance_m: float = 0.5
+    formation_lateral_spacing_m: float = 4.0
+    formation_trail_spacing_m: float = 3.0
+    formation_position_tolerance_m: float = 0.3
+    formation_yaw_tolerance_rad: float = 0.2
     telemetry_fresh_timeout_s: float = 1.0
     staging_yaw_rad: float = 0.0
 
@@ -103,6 +112,12 @@ class GroundStationCore:
         self._move_leader_position_tolerance_m: float | None = None
         self._move_leader_yaw_tolerance_rad: float | None = None
         self._move_leader_rejection: str | None = None
+        self._change_formation_started_s: float | None = None
+        self._change_formation_timeout_s: float | None = None
+        self._change_formation_target: str | None = None
+        self._change_formation_message: FormationMode | None = None
+        self._change_formation_rejection: str | None = None
+        self._formation_established_logged = False
         self._land_started_s: float | None = None
         self._land_timeout_s: float | None = None
 
@@ -110,6 +125,7 @@ class GroundStationCore:
         # 新任務先清掉舊 status，保護 action completion 不被上一輪 landed/staging 污染。
         self.vehicle_statuses = {}
         self._clear_move_leader_state()
+        self._clear_change_formation_state()
         self._takeoff_started_s = self.now_s()
         self._takeoff_timeout_s = max(float(request.timeout_sec), 0.0)
         self._takeoff_reason = (
@@ -156,6 +172,7 @@ class GroundStationCore:
         self._move_leader_position_tolerance_m = float(request.position_tolerance_m)
         self._move_leader_yaw_tolerance_rad = float(request.yaw_tolerance_rad)
         self._move_leader_rejection = None
+        self._clear_change_formation_state()
         self._leader_goal = None
         self._leader_goal_message = None
 
@@ -207,35 +224,69 @@ class GroundStationCore:
             return result
         return None
 
-    def handle_change_formation(self, request: ChangeFormation.Goal):
+    def start_change_formation(self, request: ChangeFormation.Goal) -> ChangeFormation.Feedback:
+        self.vehicle_statuses = {}
+        self._change_formation_started_s = self.now_s()
+        self._change_formation_timeout_s = max(float(request.timeout_sec), 0.0)
+        self._change_formation_target = None
+        self._change_formation_message = None
+        self._change_formation_rejection = None
+        self._formation_established_logged = False
+
         if request.formation_mode not in _supported_formation_modes():
             # 未知隊形會讓 follower slot 解讀不一致，因此在 ground station 邊界拒絕。
+            self._change_formation_rejection = (
+                f'unsupported formation mode: {request.formation_mode}'
+            )
             self._transition_to(MissionState.ERROR, 'unsupported formation mode')
-            result = ChangeFormation.Result()
-            result.success = False
-            result.message = f'unsupported formation mode: {request.formation_mode}'
-            feedback = ChangeFormation.Feedback()
-            feedback.current_state = self.mission_state.value
-            feedback.active_formation = self.active_formation
-            feedback.progress = 0.0
-            return ActionOutcome(result=result, feedback=feedback)
+            return self.change_formation_feedback()
+        if self.mission_state is not MissionState.FOLLOWING:
+            self._change_formation_rejection = 'ChangeFormation requires following state'
+            self._transition_to(MissionState.ERROR, 'change formation requires following')
+            return self.change_formation_feedback()
 
         self._transition_to(MissionState.RECONFIGURING, 'formation change accepted')
         self.active_formation = request.formation_mode
         msg = FormationMode()
         msg.stamp = self.now_stamp()
         msg.mode = request.formation_mode
+        self._change_formation_target = request.formation_mode
+        self._change_formation_message = msg
         self.publishers.formation_mode.publish(msg)
+        return self.change_formation_feedback()
 
+    def republish_formation_mode(self) -> None:
+        if self._change_formation_message is None:
+            return
+        self.publishers.formation_mode.publish(self._change_formation_message)
+
+    def change_formation_feedback(self) -> ChangeFormation.Feedback:
         feedback = ChangeFormation.Feedback()
         feedback.current_state = self.mission_state.value
         feedback.active_formation = self.active_formation
-        feedback.progress = 0.0
+        feedback.progress = self._formation_progress()
+        return feedback
 
+    def change_formation_result(self) -> ChangeFormation.Result | None:
         result = ChangeFormation.Result()
-        result.success = True
-        result.message = 'formation mode accepted and published'
-        return ActionOutcome(result=result, feedback=feedback)
+        if self._change_formation_rejection is not None:
+            result.success = False
+            result.message = self._change_formation_rejection
+            return result
+        if self._formation_established():
+            self._transition_to(MissionState.FOLLOWING, 'formation established')
+            if not self._formation_established_logged:
+                self.logger.info('formation established')
+                self._formation_established_logged = True
+            result.success = True
+            result.message = 'formation established'
+            return result
+        if self._change_formation_timed_out():
+            self._transition_to(MissionState.ERROR, 'formation change timed out')
+            result.success = False
+            result.message = 'formation change timed out'
+            return result
+        return None
 
     def handle_pause(self, request: PauseSwarm.Goal):
         command = MissionCommand.PAUSE if request.pause else MissionCommand.RESUME
@@ -265,6 +316,7 @@ class GroundStationCore:
         # LandSwarm 只看本輪降落後的新 status，避免上一輪 landed cache 直接完成 action。
         self.vehicle_statuses = {}
         self._clear_move_leader_state()
+        self._clear_change_formation_state()
         self._land_started_s = self.now_s()
         self._land_timeout_s = max(float(request.timeout_sec), 0.0)
         self._takeoff_started_s = None
@@ -449,6 +501,14 @@ class GroundStationCore:
             and self.now_s() - self._land_started_s > self._land_timeout_s
         )
 
+    def _change_formation_timed_out(self) -> bool:
+        return (
+            self._change_formation_started_s is not None
+            and self._change_formation_timeout_s is not None
+            and self.now_s() - self._change_formation_started_s
+            > self._change_formation_timeout_s
+        )
+
     def _valid_move_leader_request(self, request: MoveLeader.Goal) -> bool:
         values = (
             request.x,
@@ -482,6 +542,14 @@ class GroundStationCore:
             return None
         return status
 
+    def _fresh_formation_leader_status(self) -> VehicleStatus | None:
+        status = self._fresh_leader_status()
+        if status is None or status.vehicle_state != VehicleLevelState.FOLLOWING.value:
+            return None
+        if not _status_pose_is_finite(status):
+            return None
+        return status
+
     def _leader_remaining_distance_m(self) -> float:
         status = self._fresh_leader_status()
         if status is None or self._leader_goal is None:
@@ -512,6 +580,62 @@ class GroundStationCore:
             and self._leader_yaw_error_rad() <= self._move_leader_yaw_tolerance_rad
         )
 
+    def _formation_progress(self) -> float:
+        followers = _follower_bridge_expectations()
+        if not followers:
+            return 0.0
+        reached = sum(1 for follower in followers if self._follower_formation_ready(follower))
+        return float(reached) / float(len(followers))
+
+    def _formation_established(self) -> bool:
+        if self._change_formation_target is None:
+            return False
+        # completion 必須等真實 status 進入 tolerance，保護 operator 不把 mode topic 發出誤認為隊形已完成。
+        return self._formation_progress() >= 1.0
+
+    def _follower_formation_ready(self, vehicle) -> bool:
+        leader_status = self._fresh_formation_leader_status()
+        if leader_status is None or self._change_formation_target is None:
+            return False
+        status = self.vehicle_statuses.get(vehicle.px4_instance)
+        if not _fresh_follower_status(
+            status,
+            expected_slot=vehicle.slot.value,
+            telemetry_fresh_timeout_s=self.config.telemetry_fresh_timeout_s,
+        ):
+            return False
+        target = self._formation_target_for_follower(leader_status, vehicle)
+        return _formation_status_close(
+            status,
+            target,
+            self.config.formation_position_tolerance_m,
+            self.config.formation_yaw_tolerance_rad,
+        )
+
+    def _formation_target_for_follower(
+        self,
+        leader_status: VehicleStatus,
+        vehicle,
+    ) -> PositionYawSetpoint:
+        geometry = FormationGeometry(
+            lateral_spacing_m=self.config.formation_lateral_spacing_m,
+            trail_spacing_m=self.config.formation_trail_spacing_m,
+        )
+        leader = PositionYawSetpoint(
+            leader_status.x,
+            leader_status.y,
+            leader_status.z,
+            leader_status.yaw,
+        )
+        return body_offset_to_world(
+            leader,
+            formation_body_offset(
+                InternalFormationMode(self._change_formation_target),
+                vehicle.slot,
+                geometry,
+            ),
+        )
+
     def _move_leader_timed_out(self) -> bool:
         return (
             self._move_leader_started_s is not None
@@ -529,6 +653,14 @@ class GroundStationCore:
         self._move_leader_position_tolerance_m = None
         self._move_leader_yaw_tolerance_rad = None
         self._move_leader_rejection = None
+
+    def _clear_change_formation_state(self) -> None:
+        self._change_formation_started_s = None
+        self._change_formation_timeout_s = None
+        self._change_formation_target = None
+        self._change_formation_message = None
+        self._change_formation_rejection = None
+        self._formation_established_logged = False
 
 
 class GroundStationNode(Node):
@@ -651,10 +783,24 @@ class GroundStationNode(Node):
         return result
 
     def _execute_change_formation(self, goal_handle):
-        return self._finish_action(
-            goal_handle,
-            self.core.handle_change_formation(goal_handle.request),
-        )
+        self.core.start_change_formation(goal_handle.request)
+        while rclpy.ok():
+            self.core.republish_formation_mode()
+            goal_handle.publish_feedback(self.core.change_formation_feedback())
+            result = self.core.change_formation_result()
+            if result is not None:
+                if result.success:
+                    goal_handle.succeed()
+                else:
+                    goal_handle.abort()
+                return result
+            sleep(0.1)
+
+        result = ChangeFormation.Result()
+        result.success = False
+        result.message = 'ROS shutdown before formation established'
+        goal_handle.abort()
+        return result
 
     def _execute_pause(self, goal_handle):
         return self._finish_action(goal_handle, self.core.handle_pause(goal_handle.request))
@@ -713,6 +859,44 @@ def _position_close(
 def _yaw_error_rad(current_yaw: float, target_yaw: float) -> float:
     wrapped = (current_yaw - target_yaw + pi) % (2.0 * pi) - pi
     return abs(wrapped)
+
+
+def _status_pose_is_finite(status: VehicleStatus) -> bool:
+    return all(isfinite(value) for value in (status.x, status.y, status.z, status.yaw))
+
+
+def _formation_status_close(
+    status: VehicleStatus,
+    target: PositionYawSetpoint,
+    position_tolerance_m: float,
+    yaw_tolerance_rad: float,
+) -> bool:
+    return (
+        _position_close(status, target, position_tolerance_m)
+        and _yaw_error_rad(status.yaw, target.yaw) <= yaw_tolerance_rad
+    )
+
+
+def _fresh_follower_status(
+    status: VehicleStatus | None,
+    *,
+    expected_slot: str,
+    telemetry_fresh_timeout_s: float,
+) -> bool:
+    if status is None:
+        return False
+    return (
+        status.slot == expected_slot
+        and status.armed
+        and status.nav_state == 'offboard'
+        and isfinite(status.last_telemetry_age_sec)
+        and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
+        and _status_pose_is_finite(status)
+    )
+
+
+def _follower_bridge_expectations():
+    return [vehicle for vehicle in FIRST_VERSION_VEHICLES if vehicle.px4_instance != 1]
 
 
 def _staging_ready(

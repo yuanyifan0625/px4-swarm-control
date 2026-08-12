@@ -283,6 +283,22 @@ def test_follower_uses_current_formation_mode_topic_for_local_offset():
     assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 24.0, -5.0, 0.0)]
 
 
+def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+    mode = FormationMode()
+    mode.mode = FormationMode.LINE_ABREAST
+
+    core.handle_formation_mode(mode)
+    core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
+    core.control_tick()
+
+    assert px4_interface.setpoints == [PositionYawSetpoint(10.0, 24.0, -5.0, 0.0)]
+
+
 def test_follower_holds_when_leader_status_is_stale():
     px4_interface = FakePx4Interface()
     core = make_core(

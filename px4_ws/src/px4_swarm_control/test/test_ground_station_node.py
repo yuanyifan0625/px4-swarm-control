@@ -351,29 +351,201 @@ def test_takeoff_and_land_clear_pending_move_leader_goal_republish():
     assert len(publishers.leader_goal.messages) == 2
 
 
-def test_change_formation_accepts_supported_mode_and_rejects_unknown_mode():
+def test_change_formation_rejects_unknown_mode_and_non_following_state():
     core, publishers, _ = make_core()
     request = ChangeFormation.Goal()
     request.formation_mode = FormationMode.LINE_ABREAST
     request.timeout_sec = 8.0
 
-    accepted = core.handle_change_formation(request)
+    rejected_state = core.start_change_formation(request)
 
-    assert accepted.result.success is True
-    assert accepted.feedback.active_formation == FormationMode.LINE_ABREAST
+    assert rejected_state.current_state == 'error'
+    result = core.change_formation_result()
+    assert result.success is False
+    assert 'requires following' in result.message
+    assert publishers.formation_mode.messages == []
+
+    bad = ChangeFormation.Goal()
+    bad.formation_mode = 'circle'
+    core, publishers, _ = make_core()
+    core.mission_state = MissionState.FOLLOWING
+
+    rejected = core.start_change_formation(bad)
+
+    assert rejected.current_state == 'error'
+    result = core.change_formation_result()
+    assert result.success is False
+    assert 'unsupported formation mode' in result.message
+    assert core.mission_state is MissionState.ERROR
+    assert publishers.formation_mode.messages == []
+
+
+def test_change_formation_broadcasts_mode_without_follower_absolute_targets():
+    core, publishers, _ = make_core()
+    core.mission_state = MissionState.FOLLOWING
+    request = ChangeFormation.Goal()
+    request.formation_mode = FormationMode.LINE_ABREAST
+    request.timeout_sec = 8.0
+
+    feedback = core.start_change_formation(request)
+
+    assert feedback.current_state == 'reconfiguring'
+    assert feedback.active_formation == FormationMode.LINE_ABREAST
+    assert feedback.progress == 0.0
+    assert core.change_formation_result() is None
     assert core.mission_state is MissionState.RECONFIGURING
     msg = publishers.formation_mode.messages[-1]
     assert isinstance(msg, FormationMode)
     assert msg.mode == FormationMode.LINE_ABREAST
+    assert publishers.vehicle_setpoints[1].messages == []
+    assert publishers.vehicle_setpoints[2].messages == []
+    assert publishers.vehicle_setpoints[3].messages == []
 
-    bad = ChangeFormation.Goal()
-    bad.formation_mode = 'circle'
-    rejected = core.handle_change_formation(bad)
+    core.republish_formation_mode()
 
-    assert rejected.result.success is False
-    assert rejected.feedback.current_state == 'error'
-    assert core.mission_state is MissionState.ERROR
-    assert len(publishers.formation_mode.messages) == 1
+    assert len(publishers.formation_mode.messages) == 2
+    assert publishers.vehicle_setpoints[1].messages == []
+    assert publishers.vehicle_setpoints[2].messages == []
+    assert publishers.vehicle_setpoints[3].messages == []
+
+
+def test_change_formation_progress_and_success_wait_for_followers_inside_tolerance():
+    core, _, logger = make_core()
+    core.mission_state = MissionState.FOLLOWING
+    request = ChangeFormation.Goal()
+    request.formation_mode = FormationMode.LINE_ABREAST
+    request.timeout_sec = 8.0
+    core.start_change_formation(request)
+
+    core.handle_vehicle_status(
+        vehicle_status(1, x=10.0, y=20.0, z=-5.0, yaw=0.0, vehicle_state='following'),
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            2,
+            x=10.2,
+            y=24.1,
+            z=-5.1,
+            yaw=0.1,
+            slot='follower_left',
+            vehicle_state='following',
+        ),
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            3,
+            x=8.0,
+            y=15.0,
+            z=-5.0,
+            yaw=0.0,
+            slot='follower_right',
+            vehicle_state='following',
+        ),
+    )
+
+    feedback = core.change_formation_feedback()
+
+    assert feedback.current_state == 'reconfiguring'
+    assert feedback.progress == 0.5
+    assert core.change_formation_result() is None
+
+    core.handle_vehicle_status(
+        vehicle_status(
+            3,
+            x=10.1,
+            y=15.8,
+            z=-5.05,
+            yaw=0.19,
+            slot='follower_right',
+            vehicle_state='following',
+        ),
+    )
+
+    result = core.change_formation_result()
+    assert result.success is True
+    assert result.message == 'formation established'
+    assert core.mission_state is MissionState.FOLLOWING
+    assert 'formation established' in logger.infos
+
+
+def test_change_formation_rejects_stale_status_and_wrong_follower_slots():
+    core, _, _ = make_core()
+    core.mission_state = MissionState.FOLLOWING
+    request = ChangeFormation.Goal()
+    request.formation_mode = FormationMode.LINE_ABREAST
+    request.timeout_sec = 8.0
+    core.start_change_formation(request)
+
+    core.handle_vehicle_status(
+        vehicle_status(
+            1,
+            x=10.0,
+            y=20.0,
+            z=-5.0,
+            yaw=0.0,
+            last_telemetry_age_sec=5.0,
+            vehicle_state='following',
+        ),
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            2,
+            x=10.0,
+            y=24.0,
+            z=-5.0,
+            yaw=0.0,
+            slot='follower_left',
+            vehicle_state='following',
+        ),
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            3,
+            x=10.0,
+            y=16.0,
+            z=-5.0,
+            yaw=0.0,
+            slot='follower_right',
+            vehicle_state='following',
+        ),
+    )
+
+    assert core.change_formation_feedback().progress == 0.0
+    assert core.change_formation_result() is None
+
+    core.handle_vehicle_status(
+        vehicle_status(1, x=10.0, y=20.0, z=-5.0, yaw=0.0, vehicle_state='following'),
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            2,
+            x=10.0,
+            y=24.0,
+            z=-5.0,
+            yaw=0.0,
+            slot='follower_right',
+            vehicle_state='following',
+        ),
+    )
+
+    assert core.change_formation_feedback().progress == 0.5
+    assert core.change_formation_result() is None
+
+
+def test_change_formation_result_times_out_when_formation_never_establishes():
+    clock = [10.0]
+    core, _, _ = make_core(now_s=lambda: clock[0])
+    core.mission_state = MissionState.FOLLOWING
+    request = ChangeFormation.Goal()
+    request.formation_mode = FormationMode.LINE_ABREAST
+    request.timeout_sec = 2.0
+    core.start_change_formation(request)
+
+    clock[0] = 12.1
+
+    result = core.change_formation_result()
+    assert result.success is False
+    assert 'timed out' in result.message
 
 
 def test_pause_action_publishes_pause_or_resume_mission_command():
@@ -724,6 +896,8 @@ def vehicle_status(
     armed=True,
     nav_state='offboard',
     last_telemetry_age_sec=0.1,
+    slot='',
+    vehicle_state='staging',
 ):
     status = VehicleStatus()
     status.vehicle_id = vehicle_id
@@ -735,5 +909,6 @@ def vehicle_status(
     status.nav_state = nav_state
     status.offboard_available = True
     status.last_telemetry_age_sec = last_telemetry_age_sec
-    status.vehicle_state = 'staging'
+    status.slot = slot
+    status.vehicle_state = vehicle_state
     return status
