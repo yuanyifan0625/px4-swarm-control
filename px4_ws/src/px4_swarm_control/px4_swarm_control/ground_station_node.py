@@ -105,6 +105,7 @@ class GroundStationCore:
         self._takeoff_started_s: float | None = None
         self._takeoff_timeout_s: float | None = None
         self._takeoff_reason: str | None = None
+        self._takeoff_rejection: str | None = None
         self._leader_goal: PositionYawSetpoint | None = None
         self._leader_goal_message: LeaderGoal | None = None
         self._move_leader_started_s: float | None = None
@@ -122,10 +123,15 @@ class GroundStationCore:
         self._land_timeout_s: float | None = None
 
     def start_takeoff(self, request: TakeoffSwarm.Goal):
+        if self.mission_state is MissionState.PAUSED:
+            # Pause 期間拒絕起飛新任務，保護暫停語意只允許 resume/status/land。
+            self._takeoff_rejection = 'TakeoffSwarm rejected while swarm is paused'
+            return self.takeoff_feedback()
         # 新任務先清掉舊 status，保護 action completion 不被上一輪 landed/staging 污染。
         self.vehicle_statuses = {}
         self._clear_move_leader_state()
         self._clear_change_formation_state()
+        self._takeoff_rejection = None
         self._takeoff_started_s = self.now_s()
         self._takeoff_timeout_s = max(float(request.timeout_sec), 0.0)
         self._takeoff_reason = (
@@ -154,6 +160,10 @@ class GroundStationCore:
 
     def takeoff_result(self) -> TakeoffSwarm.Result | None:
         result = TakeoffSwarm.Result()
+        if self._takeoff_rejection is not None:
+            result.success = False
+            result.message = self._takeoff_rejection
+            return result
         if self.mission_state is MissionState.STAGING:
             result.success = True
             result.message = 'all vehicles reached staging positions'
@@ -166,6 +176,10 @@ class GroundStationCore:
         return None
 
     def start_move_leader(self, request: MoveLeader.Goal):
+        if self.mission_state is MissionState.PAUSED:
+            # Pause 期間拒絕新移動，保護 operator 以為系統停住時仍偷偷更新目標。
+            self._move_leader_rejection = 'MoveLeader rejected while swarm is paused'
+            return self.move_leader_feedback()
         self.vehicle_statuses = {}
         self._move_leader_started_s = self.now_s()
         self._move_leader_timeout_s = max(float(request.timeout_sec), 0.0)
@@ -225,6 +239,12 @@ class GroundStationCore:
         return None
 
     def start_change_formation(self, request: ChangeFormation.Goal) -> ChangeFormation.Feedback:
+        if self.mission_state is MissionState.PAUSED:
+            # Pause 期間拒絕隊形變換，保護 followers 不在 operator 暫停時改追新 slot。
+            self._change_formation_rejection = (
+                'ChangeFormation rejected while swarm is paused'
+            )
+            return self.change_formation_feedback()
         self.vehicle_statuses = {}
         self._change_formation_started_s = self.now_s()
         self._change_formation_timeout_s = max(float(request.timeout_sec), 0.0)
@@ -290,10 +310,17 @@ class GroundStationCore:
 
     def handle_pause(self, request: PauseSwarm.Goal):
         command = MissionCommand.PAUSE if request.pause else MissionCommand.RESUME
-        next_state = MissionState.PAUSED if request.pause else MissionState.IDLE
+        next_state = MissionState.PAUSED if request.pause else MissionState.HOLDING
         reason = request.reason or (
             'pause requested' if request.pause else 'resume requested'
         )
+        if request.pause:
+            self._clear_move_leader_state()
+            self._clear_change_formation_state()
+        else:
+            # Resume 只回到安全 holding，保護 pause 前的舊 action 不被自動續跑。
+            self._clear_move_leader_state()
+            self._clear_change_formation_state()
         self._transition_to(next_state, reason)
         self.publishers.mission_command.publish(self._mission_command(command, reason))
         failsafe = FailsafeCommand()

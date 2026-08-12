@@ -311,7 +311,7 @@ def test_follower_holds_when_leader_status_is_stale():
     )
     core.control_tick()
 
-    assert core.vehicle_level_state is VehicleLevelState.HOLDING
+    assert core.vehicle_level_state is VehicleLevelState.FAILSAFE
     assert px4_interface.setpoints == []
     assert px4_interface.safe_hover_calls == 1
 
@@ -359,7 +359,99 @@ def test_control_tick_uses_safe_hover_when_telemetry_is_stale():
     assert px4_interface.heartbeats == 1
     assert px4_interface.setpoints == []
     assert px4_interface.safe_hover_calls == 1
+    assert core.vehicle_level_state is VehicleLevelState.FAILSAFE
+
+
+def test_pause_holds_safe_setpoint_until_resume_without_continuing_old_leader_goal():
+    px4_interface = FakePx4Interface()
+    core = make_core(px4_interface=px4_interface)
+    goal = LeaderGoal()
+    goal.x = 4.0
+    goal.y = 5.0
+    goal.z = -6.0
+    goal.yaw = 0.7
+    core.handle_leader_goal(goal)
+    core.control_tick()
+    assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
+
+    pause = MissionCommand()
+    pause.command = MissionCommand.PAUSE
+    core.handle_mission_command(pause)
+    core.control_tick()
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.PAUSED
+    assert px4_interface.safe_hover_calls == 3
+    assert px4_interface.setpoints == [PositionYawSetpoint(4.0, 5.0, -6.0, 0.7)]
+
+    resume = MissionCommand()
+    resume.command = MissionCommand.RESUME
+    core.handle_mission_command(resume)
+    core.control_tick()
+
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
+    assert px4_interface.setpoints[-1] == PositionYawSetpoint(4.0, 5.0, -6.0, 0.7)
+
+
+def test_follower_pause_resume_waits_for_fresh_following_leader_before_following_again():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+    core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
+    core.control_tick()
+    assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
+
+    pause = MissionCommand()
+    pause.command = MissionCommand.PAUSE
+    core.handle_mission_command(pause)
+    resume = MissionCommand()
+    resume.command = MissionCommand.RESUME
+    core.handle_mission_command(resume)
+    core.handle_leader_status(
+        leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0, vehicle_state='holding'),
+    )
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.HOLDING
+    assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 24.0, -5.0, 0.0)]
+    assert px4_interface.safe_hover_calls >= 1
+
+
+def test_publish_status_exposes_paused_and_failsafe_vehicle_states():
+    status_publisher = FakePublisher()
+    paused_core = make_core(status_publisher=status_publisher)
+    pause = MissionCommand()
+    pause.command = MissionCommand.PAUSE
+
+    paused_core.handle_mission_command(pause)
+    paused_core.publish_status()
+
+    assert status_publisher.messages[-1].vehicle_state == 'paused'
+
+    status_publisher = FakePublisher()
+    paused_with_telemetry = make_core(
+        px4_interface=FakePx4Interface(
+            state=vehicle_state(vehicle_level_state=VehicleLevelState.FOLLOWING),
+        ),
+        status_publisher=status_publisher,
+    )
+    paused_with_telemetry.handle_mission_command(pause)
+    paused_with_telemetry.publish_status()
+
+    assert status_publisher.messages[-1].vehicle_state == 'paused'
+
+    status_publisher = FakePublisher()
+    failsafe_core = make_core(
+        px4_interface=FakePx4Interface(stale=True),
+        status_publisher=status_publisher,
+    )
+
+    failsafe_core.control_tick()
+    failsafe_core.publish_status()
+
+    assert status_publisher.messages[-1].vehicle_state == 'failsafe'
 
 
 def test_vehicle_staging_setpoint_and_takeoff_command_warm_up_offboard_without_qgc():

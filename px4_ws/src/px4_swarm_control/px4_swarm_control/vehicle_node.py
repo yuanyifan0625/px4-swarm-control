@@ -186,6 +186,11 @@ class VehicleNodeCore:
             if self._state_is_landed(state):
                 self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
             return
+        if self.vehicle_level_state is VehicleLevelState.PAUSED:
+            # Pause 每個 tick 都只維持 hover，保護舊 leader/formation 目標不被自動續跑。
+            self.px4_interface.publish_offboard_heartbeat()
+            self.px4_interface.publish_safe_hover_setpoint()
+            return
         if self._takeoff_to_staging_active:
             self._control_takeoff_to_staging(state)
             return
@@ -196,13 +201,18 @@ class VehicleNodeCore:
         self.px4_interface.publish_offboard_heartbeat()
         if self.px4_interface.is_telemetry_stale():
             # telemetry 過期時只重送最後安全 setpoint，保護 vehicle 不追 stale command。
-            self.transition_to(VehicleLevelState.HOLDING, 'telemetry stale')
+            self.transition_to(VehicleLevelState.FAILSAFE, 'vehicle telemetry stale')
             self.px4_interface.publish_safe_hover_setpoint()
             return
         if self.config.role is VehicleRole.FOLLOWER:
             if not self._update_follower_setpoint():
                 # leader 資訊過期時不追舊 setpoint，保護 follower 不被 stale leader 狀態拖走。
-                self.transition_to(VehicleLevelState.HOLDING, 'leader status stale')
+                next_state = (
+                    VehicleLevelState.FAILSAFE
+                    if self._leader_status_is_stale()
+                    else VehicleLevelState.HOLDING
+                )
+                self.transition_to(next_state, 'leader status stale')
                 self.px4_interface.publish_safe_hover_setpoint()
                 return
             follower_setpoint_active = True
@@ -237,6 +247,12 @@ class VehicleNodeCore:
             geometry,
         )
         return True
+
+    def _leader_status_is_stale(self) -> bool:
+        if self.leader_status is None:
+            return False
+        age = self.leader_status.last_telemetry_age_sec
+        return age != age or age > self.config.telemetry_timeout_s
 
     def _control_takeoff_to_staging(self, state) -> None:
         if state is None or self.px4_interface.is_telemetry_stale():
@@ -315,6 +331,11 @@ class VehicleNodeCore:
         return True
 
     def _status_vehicle_level_state(self, state) -> VehicleLevelState:
+        if self.vehicle_level_state in (
+            VehicleLevelState.PAUSED,
+            VehicleLevelState.FAILSAFE,
+        ):
+            return self.vehicle_level_state
         if self._state_is_landed(state):
             return VehicleLevelState.LANDED
         if state.vehicle_level_state is VehicleLevelState.LANDED:

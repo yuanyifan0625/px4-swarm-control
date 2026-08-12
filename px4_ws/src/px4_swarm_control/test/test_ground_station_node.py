@@ -570,9 +570,101 @@ def test_pause_action_publishes_pause_or_resume_mission_command():
 
     assert resumed.result.success is True
     assert resumed.feedback.paused is False
-    assert core.mission_state is MissionState.IDLE
+    assert core.mission_state is MissionState.HOLDING
     assert publishers.mission_command.messages[-1].command == MissionCommand.RESUME
     assert publishers.failsafe_command.messages[-1].active is False
+
+
+def test_resume_clears_old_move_and_formation_without_republishing_stale_commands():
+    core, publishers, _ = make_core()
+    move = MoveLeader.Goal()
+    move.x = 4.0
+    move.y = 0.0
+    move.z = -5.0
+    move.yaw = 0.0
+    move.position_tolerance_m = 0.5
+    move.yaw_tolerance_rad = 0.2
+    move.timeout_sec = 30.0
+    core.start_move_leader(move)
+    assert len(publishers.leader_goal.messages) == 1
+
+    pause = PauseSwarm.Goal()
+    pause.pause = True
+    core.handle_pause(pause)
+    resume = PauseSwarm.Goal()
+    resume.pause = False
+    core.handle_pause(resume)
+    core.republish_leader_goal()
+    core.republish_formation_mode()
+
+    assert core.mission_state is MissionState.HOLDING
+    assert len(publishers.leader_goal.messages) == 1
+    assert publishers.formation_mode.messages == []
+
+
+def test_paused_state_rejects_move_leader_and_change_formation_without_leaving_pause():
+    core, publishers, _ = make_core()
+    pause = PauseSwarm.Goal()
+    pause.pause = True
+    core.handle_pause(pause)
+    paused_status = vehicle_status(1, x=3.0, y=2.0, z=-5.0)
+    core.handle_vehicle_status(paused_status)
+
+    move = MoveLeader.Goal()
+    move.x = 4.0
+    move.y = 0.0
+    move.z = -5.0
+    move.yaw = 0.0
+    move.position_tolerance_m = 0.5
+    move.yaw_tolerance_rad = 0.2
+    move.timeout_sec = 30.0
+
+    move_feedback = core.start_move_leader(move)
+    move_result = core.move_leader_result()
+
+    assert move_feedback.current_state == 'paused'
+    assert move_result.success is False
+    assert 'paused' in move_result.message
+    assert core.mission_state is MissionState.PAUSED
+    assert core.vehicle_statuses[1] is paused_status
+    assert publishers.leader_goal.messages == []
+
+    change = ChangeFormation.Goal()
+    change.formation_mode = FormationMode.LINE_ABREAST
+    change.timeout_sec = 30.0
+
+    change_feedback = core.start_change_formation(change)
+    change_result = core.change_formation_result()
+
+    assert change_feedback.current_state == 'paused'
+    assert change_result.success is False
+    assert 'paused' in change_result.message
+    assert core.mission_state is MissionState.PAUSED
+    assert core.vehicle_statuses[1] is paused_status
+    assert publishers.formation_mode.messages == []
+
+
+def test_paused_state_rejects_takeoff_without_leaving_pause():
+    core, publishers, _ = make_core()
+    pause = PauseSwarm.Goal()
+    pause.pause = True
+    core.handle_pause(pause)
+    takeoff = TakeoffSwarm.Goal()
+    takeoff.altitude_m = 5.0
+    takeoff.timeout_sec = 20.0
+
+    feedback = core.start_takeoff(takeoff)
+    result = core.takeoff_result()
+
+    assert feedback.current_state == 'paused'
+    assert result.success is False
+    assert 'paused' in result.message
+    assert core.mission_state is MissionState.PAUSED
+    assert len(publishers.mission_command.messages) == 1
+    assert publishers.mission_command.messages[-1].command == MissionCommand.PAUSE
+    assert publishers.vehicle_setpoints[1].messages == []
+    assert publishers.vehicle_setpoints[2].messages == []
+    assert publishers.vehicle_setpoints[3].messages == []
 
 
 def test_land_action_starts_mission_without_reporting_success_before_landed():
@@ -588,6 +680,20 @@ def test_land_action_starts_mission_without_reporting_success_before_landed():
     mission = publishers.mission_command.messages[-1]
     assert mission.command == MissionCommand.LAND
     assert publishers.failsafe_command.messages == []
+
+
+def test_land_action_remains_available_from_paused_and_failsafe_states():
+    for initial_state in (MissionState.PAUSED, MissionState.FAILSAFE):
+        core, publishers, _ = make_core()
+        core.mission_state = initial_state
+        request = LandSwarm.Goal()
+        request.timeout_sec = 20.0
+
+        feedback = core.start_land(request)
+
+        assert feedback.current_state == 'landing'
+        assert core.mission_state is MissionState.LANDING
+        assert publishers.mission_command.messages[-1].command == MissionCommand.LAND
 
 
 def test_land_action_result_succeeds_only_after_current_landed_statuses():

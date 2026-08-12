@@ -39,6 +39,7 @@ class MissionState(str, Enum):
     ARMING = 'arming'
     TAKING_OFF = 'taking_off'
     STAGING = 'staging'
+    HOLDING = 'holding'
     FORMING = 'forming'
     FOLLOWING = 'following'
     RECONFIGURING = 'reconfiguring'
