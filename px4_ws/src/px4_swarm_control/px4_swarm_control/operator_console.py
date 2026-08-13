@@ -4,15 +4,21 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from math import pi
+from math import isfinite, pi, sqrt
 from time import monotonic
-from typing import Iterable, Protocol
+from typing import Callable, Iterable, Protocol
 
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.utilities import remove_ros_args
 
+from px4_swarm_control.geometry import (
+    body_offset_to_world,
+    formation_body_offset,
+    FormationGeometry,
+)
+from px4_swarm_control.models import FormationMode, PositionYawSetpoint, Slot
 from px4_swarm_interfaces.action import (
     ChangeFormation,
     LandSwarm,
@@ -37,14 +43,34 @@ class OperatorConsoleConfig:
 
     takeoff_altitude_m: float = 5.0
     default_timeout_sec: float = 60.0
-    move_step_x_m: float = 1.0
-    move_step_y_m: float = 1.0
-    altitude_step_m: float = 1.0
-    yaw_step_rad: float = pi / 4.0
+    move_step_x_m: float = 3.0
+    move_step_y_m: float = 3.0
+    altitude_step_m: float = 2.0
+    yaw_step_rad: float = pi / 3.0
     move_position_tolerance_m: float = 0.3
     move_yaw_tolerance_rad: float = 0.2
     status_wait_timeout_s: float = 2.0
-    demo_commands: tuple[str, ...] = ('1', '2', '5', '7', '6', 'home', '8')
+    settle_stable_duration_s: float = 1.0
+    settle_timeout_sec: float = 30.0
+    settle_position_tolerance_m: float = 0.5
+    settle_yaw_tolerance_rad: float = 0.25
+    settle_telemetry_timeout_s: float = 1.0
+    settle_lateral_spacing_m: float = 4.0
+    settle_trail_spacing_m: float = 3.0
+    demo_commands: tuple[str, ...] = (
+        '1',
+        '2',
+        'settle',
+        '5',
+        'settle',
+        '7',
+        'settle',
+        '6',
+        'settle',
+        'home',
+        'settle',
+        '8',
+    )
 
 
 class SwarmActionGateway(Protocol):
@@ -58,6 +84,13 @@ class SwarmActionGateway(Protocol):
 
     def describe_status(self) -> str:
         """Return a terminal-friendly status summary."""
+
+    def wait_for_formation_settle(
+        self,
+        formation_mode: str,
+        config: OperatorConsoleConfig,
+    ) -> ConsoleActionResult:
+        """Wait until followers have visibly settled into the current formation."""
 
     def takeoff(self, altitude_m: float, timeout_sec: float) -> ConsoleActionResult:
         """Call TakeoffSwarm."""
@@ -94,6 +127,7 @@ class ConsoleCommandDispatcher:
     def __init__(self, config: OperatorConsoleConfig, gateway: SwarmActionGateway):
         self._config = config
         self._gateway = gateway
+        self._active_formation = FormationMode.VEE.value
 
     def dispatch(self, command: str) -> ConsoleActionResult:
         command = command.strip()
@@ -116,6 +150,8 @@ class ConsoleCommandDispatcher:
             return self._run_formation_command('vee')
         if command == '7':
             return self._run_formation_command('line_abreast')
+        if command == 'settle':
+            return self._run_settle_command()
         if command == '8':
             return self._gateway.land(self._config.default_timeout_sec)
         if command == '9':
@@ -156,9 +192,21 @@ class ConsoleCommandDispatcher:
                 False,
                 'formation command blocked while swarm is paused',
             )
-        return self._gateway.change_formation(
+        result = self._gateway.change_formation(
             formation_mode,
             self._config.default_timeout_sec,
+        )
+        if result.success:
+            self._active_formation = formation_mode
+        return result
+
+    def _run_settle_command(self) -> ConsoleActionResult:
+        if self._gateway.is_paused():
+            return ConsoleActionResult(False, 'settle command blocked while swarm is paused')
+        # Demo settle 只觀察三機 status，保護 macro 不在 followers 尚未收斂時送下一步。
+        return self._gateway.wait_for_formation_settle(
+            self._active_formation,
+            self._config,
         )
 
     def _run_demo_macro(self) -> ConsoleActionResult:
@@ -245,6 +293,21 @@ class RosSwarmActionGateway:
                 f'yaw={status.yaw:.2f}'
             )
         return '\n'.join(lines)
+
+    def wait_for_formation_settle(
+        self,
+        formation_mode: str,
+        config: OperatorConsoleConfig,
+    ) -> ConsoleActionResult:
+        deadline = monotonic() + config.settle_timeout_sec
+        gate = FormationSettleGate(config)
+        while monotonic() < deadline:
+            self._spin_once()
+            if any(status.vehicle_state == 'paused' for status in self._statuses.values()):
+                return ConsoleActionResult(False, 'formation settle stopped while paused')
+            if gate.update(self._statuses, formation_mode):
+                return ConsoleActionResult(True, 'formation settled')
+        return ConsoleActionResult(False, 'formation settle timed out')
 
     def takeoff(self, altitude_m: float, timeout_sec: float) -> ConsoleActionResult:
         goal = TakeoffSwarm.Goal()
@@ -340,7 +403,30 @@ class OperatorConsoleNode(Node):
         self.declare_parameter('move_position_tolerance_m', 0.3)
         self.declare_parameter('move_yaw_tolerance_rad', 0.2)
         self.declare_parameter('status_wait_timeout_s', 2.0)
-        self.declare_parameter('demo_commands', ['1', '2', '5', '7', '6', 'home', '8'])
+        self.declare_parameter('settle_stable_duration_s', 1.0)
+        self.declare_parameter('settle_timeout_sec', 30.0)
+        self.declare_parameter('settle_position_tolerance_m', 0.5)
+        self.declare_parameter('settle_yaw_tolerance_rad', 0.25)
+        self.declare_parameter('settle_telemetry_timeout_s', 1.0)
+        self.declare_parameter('settle_lateral_spacing_m', 4.0)
+        self.declare_parameter('settle_trail_spacing_m', 3.0)
+        self.declare_parameter(
+            'demo_commands',
+            [
+                '1',
+                '2',
+                'settle',
+                '5',
+                'settle',
+                '7',
+                'settle',
+                '6',
+                'settle',
+                'home',
+                'settle',
+                '8',
+            ],
+        )
 
     def _load_config(self) -> OperatorConsoleConfig:
         yaw_step_deg = float(self.get_parameter('yaw_step_deg').value)
@@ -356,6 +442,23 @@ class OperatorConsoleNode(Node):
             ),
             move_yaw_tolerance_rad=float(self.get_parameter('move_yaw_tolerance_rad').value),
             status_wait_timeout_s=float(self.get_parameter('status_wait_timeout_s').value),
+            settle_stable_duration_s=float(
+                self.get_parameter('settle_stable_duration_s').value
+            ),
+            settle_timeout_sec=float(self.get_parameter('settle_timeout_sec').value),
+            settle_position_tolerance_m=float(
+                self.get_parameter('settle_position_tolerance_m').value
+            ),
+            settle_yaw_tolerance_rad=float(
+                self.get_parameter('settle_yaw_tolerance_rad').value
+            ),
+            settle_telemetry_timeout_s=float(
+                self.get_parameter('settle_telemetry_timeout_s').value
+            ),
+            settle_lateral_spacing_m=float(
+                self.get_parameter('settle_lateral_spacing_m').value
+            ),
+            settle_trail_spacing_m=float(self.get_parameter('settle_trail_spacing_m').value),
             demo_commands=tuple(self.get_parameter('demo_commands').value),
         )
 
@@ -416,7 +519,124 @@ def _help_text() -> str:
         '  7: ChangeFormation line_abreast\n'
         '  8: LandSwarm\n'
         '  9: demo macro\n'
+        '  settle: wait until followers settle into the current formation\n'
     )
+
+
+class FormationSettleGate:
+    """Track a continuous stable window for follower formation readiness."""
+
+    def __init__(
+        self,
+        config: OperatorConsoleConfig,
+        now_s: Callable[[], float] = monotonic,
+    ) -> None:
+        self._config = config
+        self._now_s = now_s
+        self._stable_since_s: float | None = None
+
+    def update(self, statuses: dict[int, VehicleStatus], formation_mode: str) -> bool:
+        now_s = self._now_s()
+        if not formation_settle_ready(statuses, formation_mode, self._config):
+            self._stable_since_s = None
+            return False
+        if self._stable_since_s is None:
+            self._stable_since_s = now_s
+            return False
+        return now_s - self._stable_since_s >= self._config.settle_stable_duration_s
+
+
+def formation_settle_ready(
+    statuses: dict[int, VehicleStatus],
+    formation_mode: str,
+    config: OperatorConsoleConfig,
+) -> bool:
+    try:
+        mode = FormationMode(formation_mode)
+    except ValueError:
+        return False
+
+    leader_status = statuses.get(1)
+    if not _fresh_status(leader_status, config.settle_telemetry_timeout_s):
+        return False
+
+    for vehicle_id, slot in (
+        (2, Slot.FOLLOWER_LEFT),
+        (3, Slot.FOLLOWER_RIGHT),
+    ):
+        follower_status = statuses.get(vehicle_id)
+        if not _fresh_status(follower_status, config.settle_telemetry_timeout_s):
+            return False
+        if follower_status.slot != slot.value:
+            return False
+        target = _formation_target_for_follower(leader_status, mode, slot, config)
+        if not _status_close_to_setpoint(
+            follower_status,
+            target,
+            config.settle_position_tolerance_m,
+            config.settle_yaw_tolerance_rad,
+        ):
+            return False
+    return True
+
+
+def _formation_target_for_follower(
+    leader_status: VehicleStatus,
+    formation_mode: FormationMode,
+    slot: Slot,
+    config: OperatorConsoleConfig,
+) -> PositionYawSetpoint:
+    geometry = FormationGeometry(
+        lateral_spacing_m=config.settle_lateral_spacing_m,
+        trail_spacing_m=config.settle_trail_spacing_m,
+    )
+    leader = PositionYawSetpoint(
+        leader_status.x,
+        leader_status.y,
+        leader_status.z,
+        leader_status.yaw,
+    )
+    return body_offset_to_world(
+        leader,
+        formation_body_offset(formation_mode, slot, geometry),
+    )
+
+
+def _fresh_status(status: VehicleStatus | None, telemetry_timeout_s: float) -> bool:
+    if status is None:
+        return False
+    return (
+        _status_pose_is_finite(status)
+        and status.armed
+        and status.nav_state == 'offboard'
+        and isfinite(status.last_telemetry_age_sec)
+        and status.last_telemetry_age_sec <= telemetry_timeout_s
+    )
+
+
+def _status_pose_is_finite(status: VehicleStatus) -> bool:
+    return all(isfinite(value) for value in (status.x, status.y, status.z, status.yaw))
+
+
+def _status_close_to_setpoint(
+    status: VehicleStatus,
+    target: PositionYawSetpoint,
+    position_tolerance_m: float,
+    yaw_tolerance_rad: float,
+) -> bool:
+    distance_m = sqrt(
+        (status.x - target.x) ** 2
+        + (status.y - target.y) ** 2
+        + (status.z - target.z) ** 2
+    )
+    return (
+        distance_m <= position_tolerance_m
+        and _yaw_error_rad(status.yaw, target.yaw) <= yaw_tolerance_rad
+    )
+
+
+def _yaw_error_rad(current_yaw: float, target_yaw: float) -> float:
+    return abs((current_yaw - target_yaw + pi) % (2.0 * pi) - pi)
 
 
 if __name__ == '__main__':

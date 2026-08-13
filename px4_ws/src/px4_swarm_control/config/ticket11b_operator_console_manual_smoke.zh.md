@@ -1,13 +1,14 @@
 # Ticket 11b：Operator 短指令 Console 手動 smoke 驗證
 
-目標：第一版 SITL 不依賴 QGC，透過 `operator_console` 用短指令呼叫既有 `/swarm/*` actions，減少手動輸入長 action 指令。Console 只能控制 ground station action surface，不得替 followers 計算或發布 absolute target。
+目標：第一版 SITL 不依賴 QGC，透過 `operator_console` 用短指令呼叫既有 `/swarm/*` actions，減少手動輸入長 action 指令。Console 只能控制 ground station action surface，不得替 followers 計算或發布 absolute target。Ticket 11c 起，demo macro 可使用 `settle` 觀察關卡，等 followers 進入目前 formation tolerance 並穩定後才執行下一步。
 
 完整任務卡：
 
 ```text
 clean runtime -> start bridge/PX4/vehicle nodes/ground station -> operator_console
--> 1 takeoff -> 2 leader +x -> 5 yaw +45deg -> 7 line_abreast -> 6 vee
+-> 1 takeoff -> 2 leader +x -> 5 yaw +step -> 7 line_abreast -> 6 vee
 -> p pause -> 2 move rejected while paused -> r resume -> 2 fresh move -> 8 land
+-> optional 9 demo macro with settle gates
 ```
 
 所有指令都假設你已經進入 container，workspace 在：
@@ -80,8 +81,8 @@ Console 會顯示短指令說明：
 
 ```text
 s=status, p=pause, r=resume, q=quit, h=help
-1=takeoff, 2=leader x+1m, 3=leader y+1m, 4=leader up 1m, 5=yaw+45deg
-6=vee, 7=line_abreast, 8=land, 9=demo macro
+1=takeoff, 2=leader x+step, 3=leader y+step, 4=leader up step, 5=yaw+step
+6=vee, 7=line_abreast, 8=land, 9=demo macro, settle=wait followers stable
 ```
 
 注意：PX4 local position 使用 NED 座標，所以 `4` 的「上升 1m」實際會讓 MoveLeader goal 的 `z` 減少 `1.0`。
@@ -195,7 +196,7 @@ ros2 run px4_swarm_control operator_console --ros-args \
 
 通過條件：每次只執行一個 console command 後退出；這只是手動 action 的短指令包裝，不會改變既有 action API。
 
-## 10. Optional：demo macro
+## 10. Optional：demo macro with settle
 
 乾淨 runtime 且三台 vehicle/ground station 都啟動後，可直接在 console 輸入：
 
@@ -206,7 +207,7 @@ ros2 run px4_swarm_control operator_console --ros-args \
 預設 macro：
 
 ```text
-1 -> 2 -> 5 -> 7 -> 6 -> home -> 8
+1 -> 2 -> settle -> 5 -> settle -> 7 -> settle -> 6 -> settle -> home -> settle -> 8
 ```
 
 通過條件：
@@ -214,6 +215,20 @@ ros2 run px4_swarm_control operator_console --ros-args \
 - 任一步失敗時 macro 會停止，不會硬跑後續命令。
 - 若全部成功，console 輸出 `OK: demo macro completed`。
 - `home` 會回到 takeoff 完成後讀到的 leader staging 位置。
+- 每個 `settle` 只觀察 `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status` 和目前 console 記錄的 formation mode，不會發布 follower target。
+- Gazebo 中 followers 應在每個 leader move、yaw change 或 formation change 後穩定一下，才進入下一個 demo step。
+
+確認 `settle` 沒有造成不乾淨資訊流：
+
+```bash
+cd /home/ncrl/docker_ubuntu24/px4_ws
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+timeout 3 ros2 topic echo --once /vehicle_2/staging_setpoint || true
+timeout 3 ros2 topic echo --once /vehicle_3/staging_setpoint || true
+```
+
+通過條件：demo following / formation change 階段不應因 `settle` 產生新的 follower staging setpoint；followers 應只透過各自 `vehicle_node` 根據 `/vehicle_1/status` 和 formation mode 本地計算跟隨 setpoint。
 
 ## 整體通過條件
 
@@ -221,6 +236,7 @@ ros2 run px4_swarm_control operator_console --ros-args \
 - Console 可以從 container 內的 `px4_ws` 啟動。
 - Console 只呼叫既有 `/swarm/takeoff`、`/swarm/move_leader`、`/swarm/change_formation`、`/swarm/pause`、`/swarm/land`。
 - Console 不發送 direct follower targets，也不繞過 `ground_station_node`。
+- `settle` 只作為 demo observation gate，不是新的 mission command，也不改 followers 的控制來源。
 - `2/3/4/5` 都先讀 leader status，再轉成 absolute `MoveLeader` goal。
 - Paused 狀態允許 `s/r/8`，阻擋 `2/3/4/5/6/7/9`。
 - 既有手動 `ros2 action send_goal` workflow 仍可用。
