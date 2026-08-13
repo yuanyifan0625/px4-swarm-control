@@ -48,10 +48,10 @@ class FakeNode:
         return self.now_us
 
 
-def make_interface(now_us=123456, namespace='/vehicle_2', px4_target_system=3):
+def make_interface(now_us=123456, namespace='/MAV2', px4_target_system=3):
     return Px4VehicleInterface(
         node=FakeNode(now_us=now_us),
-        vehicle_id='vehicle_2',
+        vehicle_id='MAV2',
         px4_namespace=namespace,
         px4_target_system=px4_target_system,
         telemetry_timeout_s=0.5,
@@ -59,21 +59,21 @@ def make_interface(now_us=123456, namespace='/vehicle_2', px4_target_system=3):
 
 
 def test_interface_creates_vehicle_namespaced_px4_topics():
-    interface = make_interface(namespace='/vehicle_2')
+    interface = make_interface(namespace='/MAV2')
 
     publisher_topics = [publisher.topic for publisher in interface.node.publishers]
     subscriber_topics = [subscription[1] for subscription in interface.node.subscriptions]
 
     assert publisher_topics == [
-        '/vehicle_2/fmu/in/offboard_control_mode',
-        '/vehicle_2/fmu/in/trajectory_setpoint',
-        '/vehicle_2/fmu/in/vehicle_command',
+        '/MAV2/fmu/in/offboard_control_mode',
+        '/MAV2/fmu/in/trajectory_setpoint',
+        '/MAV2/fmu/in/vehicle_command',
     ]
     assert subscriber_topics == [
-        '/vehicle_2/fmu/out/vehicle_local_position_v1',
-        '/vehicle_2/fmu/out/vehicle_status_v4',
-        '/vehicle_2/fmu/out/vehicle_command_ack_v1',
-        '/vehicle_2/fmu/out/vehicle_land_detected',
+        '/MAV2/fmu/out/vehicle_local_position_v1',
+        '/MAV2/fmu/out/vehicle_status_v4',
+        '/MAV2/fmu/out/vehicle_command_ack_v1',
+        '/MAV2/fmu/out/vehicle_land_detected',
     ]
 
 
@@ -185,7 +185,7 @@ def test_vehicle_state_converts_latest_px4_telemetry_to_internal_model():
     interface.handle_vehicle_status(vehicle_status)
 
     state = interface.vehicle_state()
-    assert state.vehicle_id == 'vehicle_2'
+    assert state.vehicle_id == 'MAV2'
     assert state.position == (1.0, 2.0, -3.0)
     assert state.velocity == (0.1, 0.2, -0.3)
     assert state.yaw == 0.5

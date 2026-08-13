@@ -1,10 +1,12 @@
 from math import isclose, pi
 
+from px4_swarm_control import operator_console
 from px4_swarm_control.operator_console import (
     ConsoleActionResult,
     ConsoleCommandDispatcher,
     FormationSettleGate,
     OperatorConsoleConfig,
+    RosSwarmActionGateway,
     SwarmActionGateway,
     formation_settle_ready,
 )
@@ -139,6 +141,31 @@ def test_numeric_commands_call_existing_swarm_actions_with_configured_defaults()
         ('change_formation', 'vee', 70.0),
         ('change_formation', 'line_abreast', 70.0),
         ('land', 70.0),
+    ]
+
+
+def test_ros_gateway_subscribes_to_mav_status_topics(monkeypatch):
+    class FakeActionClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class FakeNode:
+        def __init__(self):
+            self.subscriptions = []
+
+        def create_subscription(self, msg_type, topic, callback, qos):
+            self.subscriptions.append((msg_type, topic, callback, qos))
+            return topic
+
+    monkeypatch.setattr(operator_console, 'ActionClient', FakeActionClient)
+
+    node = FakeNode()
+    RosSwarmActionGateway(node, OperatorConsoleConfig())
+
+    assert [subscription[1] for subscription in node.subscriptions] == [
+        '/MAV1/status',
+        '/MAV2/status',
+        '/MAV3/status',
     ]
 
 

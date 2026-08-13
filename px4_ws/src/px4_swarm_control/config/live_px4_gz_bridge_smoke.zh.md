@@ -26,11 +26,11 @@ make px4_sitl
 
 通過條件：產生 `build/px4_sitl_default/bin/px4`。
 
-## Terminal 3：啟動 vehicle_1，並讓它開 Gazebo
+## Terminal 3：啟動 MAV1，並讓它開 Gazebo
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/PX4-Autopilot
-PX4_UXRCE_DDS_NS=vehicle_1 \
+PX4_UXRCE_DDS_NS=MAV1 \
 PX4_SYS_AUTOSTART=4001 \
 PX4_SIM_MODEL=gz_x500 \
 ./build/px4_sitl_default/bin/px4 -i 1
@@ -38,11 +38,11 @@ PX4_SIM_MODEL=gz_x500 \
 
 通過條件：Gazebo 開啟，並出現 `x500_1`。
 
-## Terminal 4：啟動 vehicle_2，加入同一個 Gazebo world
+## Terminal 4：啟動 MAV2，加入同一個 Gazebo world
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/PX4-Autopilot
-PX4_UXRCE_DDS_NS=vehicle_2 \
+PX4_UXRCE_DDS_NS=MAV2 \
 PX4_GZ_STANDALONE=1 \
 PX4_SYS_AUTOSTART=4001 \
 PX4_GZ_MODEL_POSE="0,2,0" \
@@ -52,12 +52,12 @@ PX4_SIM_MODEL=gz_x500 \
 
 通過條件：Gazebo 裡新增 `x500_2`，位置和第一台有水平距離。
 
-## Terminal 5：啟動 vehicle_3，加入同一個 Gazebo world
+## Terminal 5：啟動 MAV3，加入同一個 Gazebo world
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/PX4-Autopilot
 PX4_GZ_NO_FOLLOW=1 \
-PX4_UXRCE_DDS_NS=vehicle_3 \
+PX4_UXRCE_DDS_NS=MAV3 \
 PX4_GZ_STANDALONE=1 \
 PX4_SYS_AUTOSTART=4001 \
 PX4_GZ_MODEL_POSE="0,-2,0" \
@@ -82,15 +82,15 @@ gz topic -e -t /world/default/pose/info -n 1
 cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-ros2 topic info -v /vehicle_1/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /vehicle_2/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /vehicle_3/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /vehicle_1/fmu/out/vehicle_status_v4
-ros2 topic info -v /vehicle_2/fmu/out/vehicle_status_v4
-ros2 topic info -v /vehicle_3/fmu/out/vehicle_status_v4
-ros2 topic info -v /vehicle_1/fmu/out/vehicle_command_ack_v1
-ros2 topic info -v /vehicle_2/fmu/out/vehicle_command_ack_v1
-ros2 topic info -v /vehicle_3/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_local_position_v1
+ros2 topic info -v /MAV2/fmu/out/vehicle_local_position_v1
+ros2 topic info -v /MAV3/fmu/out/vehicle_local_position_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_status_v4
+ros2 topic info -v /MAV2/fmu/out/vehicle_status_v4
+ros2 topic info -v /MAV3/fmu/out/vehicle_status_v4
+ros2 topic info -v /MAV1/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV2/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV3/fmu/out/vehicle_command_ack_v1
 ```
 
 通過條件：每個 topic 都要看到 `Publisher count: 1`。如果只有 `Subscription count`，代表只是 ROS 2 node 訂閱造成 topic 出現，不代表 PX4 有送資料。
@@ -117,7 +117,7 @@ ros2 run px4_swarm_control check_live_px4_gz_bridge \
 
 ## 本 ticket 固定的 convention
 
-- 專案 ROS 2 namespace 使用 `/vehicle_1`、`/vehicle_2`、`/vehicle_3`。
-- PX4 用 `PX4_UXRCE_DDS_NS=vehicle_N` 對齊這個 namespace convention。
+- 專案 ROS 2 namespace 使用 `/MAV1`、`/MAV2`、`/MAV3`。
+- PX4 用 `PX4_UXRCE_DDS_NS=MAVN` 對齊這個 namespace convention。
 - PX4 v1.18 output topic 使用版本尾綴，例如 `vehicle_local_position_v1`、`vehicle_status_v4`、`vehicle_command_ack_v1`。
 - 使用 `-i 1`、`-i 2`、`-i 3` 啟動 PX4 時，第一版 `px4_target_system` 對應為 `2`、`3`、`4`。

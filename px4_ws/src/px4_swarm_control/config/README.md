@@ -31,24 +31,24 @@ make px4_sitl
 
 Expected result: `build/px4_sitl_default/bin/px4` exists.
 
-### Terminal 3: vehicle_1 starts Gazebo
+### Terminal 3: MAV1 starts Gazebo
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/PX4-Autopilot
-PX4_UXRCE_DDS_NS=vehicle_1 \
+PX4_UXRCE_DDS_NS=MAV1 \
 PX4_SYS_AUTOSTART=4001 \
 PX4_SIM_MODEL=gz_x500 \
 ./build/px4_sitl_default/bin/px4 -i 1
 ```
 
 Expected result: Gazebo starts and model `x500_1` is spawned. The explicit
-`PX4_UXRCE_DDS_NS=vehicle_1` keeps ROS 2 topics under `/vehicle_1`.
+`PX4_UXRCE_DDS_NS=MAV1` keeps ROS 2 topics under `/MAV1`.
 
-### Terminal 4: vehicle_2 joins the same Gazebo world
+### Terminal 4: MAV2 joins the same Gazebo world
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/PX4-Autopilot
-PX4_UXRCE_DDS_NS=vehicle_2 \
+PX4_UXRCE_DDS_NS=MAV2 \
 PX4_GZ_STANDALONE=1 \
 PX4_SYS_AUTOSTART=4001 \
 PX4_GZ_MODEL_POSE="0,2,0" \
@@ -59,11 +59,11 @@ PX4_SIM_MODEL=gz_x500 \
 Expected result: model `x500_2` joins the existing Gazebo world at a separated
 horizontal position.
 
-### Terminal 5: vehicle_3 joins the same Gazebo world
+### Terminal 5: MAV3 joins the same Gazebo world
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/PX4-Autopilot
-PX4_UXRCE_DDS_NS=vehicle_3 \
+PX4_UXRCE_DDS_NS=MAV3 \
 PX4_GZ_STANDALONE=1 \
 PX4_SYS_AUTOSTART=4001 \
 PX4_GZ_MODEL_POSE="0,-2,0" \
@@ -82,15 +82,15 @@ source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 gz topic -l | grep -E '/model/x500_[123]'
 gz topic -e -t /world/default/pose/info -n 1
-ros2 topic info -v /vehicle_1/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /vehicle_2/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /vehicle_3/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /vehicle_1/fmu/out/vehicle_status_v4
-ros2 topic info -v /vehicle_2/fmu/out/vehicle_status_v4
-ros2 topic info -v /vehicle_3/fmu/out/vehicle_status_v4
-ros2 topic info -v /vehicle_1/fmu/out/vehicle_command_ack_v1
-ros2 topic info -v /vehicle_2/fmu/out/vehicle_command_ack_v1
-ros2 topic info -v /vehicle_3/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_local_position_v1
+ros2 topic info -v /MAV2/fmu/out/vehicle_local_position_v1
+ros2 topic info -v /MAV3/fmu/out/vehicle_local_position_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_status_v4
+ros2 topic info -v /MAV2/fmu/out/vehicle_status_v4
+ros2 topic info -v /MAV3/fmu/out/vehicle_status_v4
+ros2 topic info -v /MAV1/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV2/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV3/fmu/out/vehicle_command_ack_v1
 ```
 
 Expected result: each ROS 2 topic inspection shows `Publisher count: 1`. A topic
@@ -120,16 +120,16 @@ ros2 run px4_swarm_control check_live_px4_gz_bridge \
 
 ## Namespace and target-system convention
 
-The project namespace convention remains `/vehicle_1`, `/vehicle_2`, and
-`/vehicle_3`. PX4's default multi-vehicle namespaces may be `/px4_1`,
-`/px4_2`, and `/px4_3`, so this workflow uses `PX4_UXRCE_DDS_NS=vehicle_N` to
+The project namespace convention remains `/MAV1`, `/MAV2`, and
+`/MAV3`. PX4's default multi-vehicle namespaces may be `/px4_1`,
+`/px4_2`, and `/px4_3`, so this workflow uses `PX4_UXRCE_DDS_NS=MAVN` to
 make PX4 publish under the project namespaces.
 
 When PX4 is launched with `-i 1`, `-i 2`, and `-i 3`, first-version command
 targets are configured as:
 
-- `vehicle_1`: `px4_target_system=2`
-- `vehicle_2`: `px4_target_system=3`
-- `vehicle_3`: `px4_target_system=4`
+- `MAV1`: `px4_target_system=2`
+- `MAV2`: `px4_target_system=3`
+- `MAV3`: `px4_target_system=4`
 
 This keeps future takeoff/land commands addressed to the intended PX4 instance.

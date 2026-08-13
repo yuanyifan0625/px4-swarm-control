@@ -27,7 +27,7 @@ SUPPORTED_PX4_SPEED_PARAMS = frozenset(
         'MPC_YAWRAUTO_ACC',
     }
 )
-DEFAULT_VEHICLE_IDS = ('vehicle_1', 'vehicle_2', 'vehicle_3')
+DEFAULT_VEHICLE_IDS = ('MAV1', 'MAV2', 'MAV3')
 
 
 class ExplicitApplyRequiredError(ValueError):

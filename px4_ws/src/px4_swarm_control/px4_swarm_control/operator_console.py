@@ -13,6 +13,7 @@ from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.utilities import remove_ros_args
 
+from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES
 from px4_swarm_control.geometry import (
     body_offset_to_world,
     formation_body_offset,
@@ -262,11 +263,11 @@ class RosSwarmActionGateway:
         self._subscriptions = [
             node.create_subscription(
                 VehicleStatus,
-                f'/vehicle_{vehicle_id}/status',
+                f'{vehicle.namespace}/status',
                 self._handle_status,
                 10,
             )
-            for vehicle_id in (1, 2, 3)
+            for vehicle in FIRST_VERSION_VEHICLES
         ]
 
     def get_leader_status(self) -> VehicleStatus | None:
@@ -287,7 +288,7 @@ class RosSwarmActionGateway:
         for vehicle_id in sorted(self._statuses):
             status = self._statuses[vehicle_id]
             lines.append(
-                f'vehicle_{vehicle_id}: state={status.vehicle_state} '
+                f'MAV{vehicle_id}: state={status.vehicle_state} '
                 f'armed={status.armed} '
                 f'pos=({status.x:.2f}, {status.y:.2f}, {status.z:.2f}) '
                 f'yaw={status.yaw:.2f}'

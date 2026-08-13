@@ -18,4 +18,4 @@ EXPECTED_MESSAGES = (
 )
 
 SWARM_NAMESPACE = "/swarm"
-VEHICLE_NAMESPACES = ("/vehicle_1", "/vehicle_2", "/vehicle_3")
+VEHICLE_NAMESPACES = ("/MAV1", "/MAV2", "/MAV3")

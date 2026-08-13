@@ -1,6 +1,7 @@
 from px4_swarm_control.live_bridge_smoke import (
     disconnected_agent_clients,
     expected_px4_instance_commands,
+    expected_ros2_topics,
     missing_gazebo_models,
     missing_ros2_publishers,
     models_without_separated_pose,
@@ -10,14 +11,14 @@ from px4_swarm_control.live_bridge_smoke import (
 def test_expected_px4_instance_commands_keep_vehicle_namespaces_and_safe_spacing():
     commands = expected_px4_instance_commands()
 
-    assert 'PX4_UXRCE_DDS_NS=vehicle_1' in commands[0]
+    assert 'PX4_UXRCE_DDS_NS=MAV1' in commands[0]
     assert 'PX4_GZ_STANDALONE=1' not in commands[0]
     assert './build/px4_sitl_default/bin/px4 -i 1' in commands[0]
-    assert 'PX4_UXRCE_DDS_NS=vehicle_2' in commands[1]
+    assert 'PX4_UXRCE_DDS_NS=MAV2' in commands[1]
     assert 'PX4_GZ_STANDALONE=1' in commands[1]
     assert 'PX4_GZ_MODEL_POSE="0,2,0"' in commands[1]
     assert './build/px4_sitl_default/bin/px4 -i 2' in commands[1]
-    assert 'PX4_UXRCE_DDS_NS=vehicle_3' in commands[2]
+    assert 'PX4_UXRCE_DDS_NS=MAV3' in commands[2]
     assert 'PX4_GZ_STANDALONE=1' in commands[2]
     assert 'PX4_GZ_MODEL_POSE="0,-2,0"' in commands[2]
     assert './build/px4_sitl_default/bin/px4 -i 3' in commands[2]
@@ -35,20 +36,29 @@ def test_missing_gazebo_models_reports_only_absent_models():
 
 def test_missing_ros2_publishers_requires_versioned_px4_v118_topics():
     topic_info = {
-        '/vehicle_1/fmu/out/vehicle_local_position_v1': 'Publisher count: 1\n',
-        '/vehicle_1/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
-        '/vehicle_1/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
-        '/vehicle_2/fmu/out/vehicle_local_position_v1': 'Publisher count: 0\n',
-        '/vehicle_2/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
-        '/vehicle_2/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
-        '/vehicle_3/fmu/out/vehicle_local_position_v1': 'Publisher count: 1\n',
-        '/vehicle_3/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
-        '/vehicle_3/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
+        '/MAV1/fmu/out/vehicle_local_position_v1': 'Publisher count: 1\n',
+        '/MAV1/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
+        '/MAV1/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
+        '/MAV2/fmu/out/vehicle_local_position_v1': 'Publisher count: 0\n',
+        '/MAV2/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
+        '/MAV2/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
+        '/MAV3/fmu/out/vehicle_local_position_v1': 'Publisher count: 1\n',
+        '/MAV3/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
+        '/MAV3/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
     }
 
     assert missing_ros2_publishers(topic_info) == [
-        '/vehicle_2/fmu/out/vehicle_local_position_v1',
+        '/MAV2/fmu/out/vehicle_local_position_v1',
     ]
+
+
+def test_expected_ros2_topics_do_not_use_old_vehicle_prefixes():
+    topics = expected_ros2_topics()
+
+    assert '/MAV1/fmu/out/vehicle_local_position_v1' in topics
+    assert '/MAV2/fmu/out/vehicle_status_v4' in topics
+    assert '/MAV3/fmu/out/vehicle_command_ack_v1' in topics
+    assert all(not topic.startswith('/vehicle_') for topic in topics)
 
 
 def test_disconnected_agent_clients_requires_three_established_sessions():

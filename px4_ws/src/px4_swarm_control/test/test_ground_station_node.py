@@ -735,13 +735,13 @@ def test_vehicle_status_updates_swarm_status_summary():
     status = VehicleStatus()
     status.vehicle_id = 2
     status.role = 'follower'
-    status.px4_namespace = '/vehicle_2'
+    status.px4_namespace = '/MAV2'
     status.vehicle_state = 'holding'
     status.last_telemetry_age_sec = 0.25
 
     core.handle_vehicle_status(status)
 
-    assert core.vehicle_statuses[2].px4_namespace == '/vehicle_2'
+    assert core.vehicle_statuses[2].px4_namespace == '/MAV2'
     assert core.vehicle_statuses[2].vehicle_state == 'holding'
     assert isclose(core.vehicle_statuses[2].last_telemetry_age_sec, 0.25)
 
@@ -966,8 +966,8 @@ def test_ground_station_node_starts_under_swarm_namespace_with_actions(monkeypat
         assert node.resolve_topic_name('leader_goal') == '/swarm/leader_goal'
         assert node.resolve_topic_name('formation_mode') == '/swarm/formation_mode'
         assert node.resolve_topic_name('failsafe_command') == '/swarm/failsafe_command'
-        assert node.resolve_topic_name('/vehicle_1/staging_setpoint') == (
-            '/vehicle_1/staging_setpoint'
+        assert node.resolve_topic_name('/MAV1/staging_setpoint') == (
+            '/MAV1/staging_setpoint'
         )
         assert sorted(node.core.publishers.vehicle_setpoints) == [1, 2, 3]
     finally:

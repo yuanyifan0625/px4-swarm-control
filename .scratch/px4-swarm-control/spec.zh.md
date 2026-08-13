@@ -45,9 +45,9 @@ Micro XRCE-DDS Agent 視為外部 ROS 2-PX4 bridge。ROS 2 package 應透過 `px
 16. 作為 operator，我希望 ground station 在 formation established 時回報，讓我知道系統已進入 formation behavior。
 17. 作為 developer，我希望每台 vehicle 都由一個可參數化的 `vehicle_node` 表示，讓 leader 和 follower behavior 共用同一種 implementation shape。
 18. 作為 developer，我希望有 `role`、`vehicle_id`、`px4_namespace` 和 `slot` parameters，讓一個 executable 能表示三台 vehicles。
-19. 作為 developer，我希望 `vehicle_1` 是 leader namespace，讓第一版有穩定且容易檢查的 leader assignment。
-20. 作為 developer，我希望 `vehicle_2` 是 follower-left slot 1，讓 slot naming 符合 vehicle 初始幾何位置。
-21. 作為 developer，我希望 `vehicle_3` 是 follower-right slot 2，讓 left/right slot assignment 不含糊。
+19. 作為 developer，我希望 `MAV1` 是 leader namespace，讓第一版有穩定且容易檢查的 leader assignment。
+20. 作為 developer，我希望 `MAV2` 是 follower-left slot 1，讓 slot naming 符合 vehicle 初始幾何位置。
+21. 作為 developer，我希望 `MAV3` 是 follower-right slot 2，讓 left/right slot assignment 不含糊。
 22. 作為 developer，我希望 follower-left 和 follower-right staging positions 相對於 leader initial yaw 定義，讓 "left" 和 "right" 保持幾何意義。
 23. 作為 developer，我希望 staging 使用 world-frame positions，讓 takeoff 和 landing 能降低碰撞風險。
 24. 作為 developer，我希望 formation following 使用 leader body-frame offsets，讓 cruise/follow behavior 中 formation 能隨 leader heading 旋轉。
@@ -100,7 +100,7 @@ Micro XRCE-DDS Agent 視為外部 ROS 2-PX4 bridge。ROS 2 package 應透過 `px
 - 新的專案 ROS 2 packages 放在 ROS 2 workspace `px4_ws/src/`，不要直接放在外層 Docker workspace。
 - Runtime topology 有四個主要 ROS 2 nodes：一個 ground-station node 和三個 parameterized vehicle node instances。
 - vehicle node executable 由三台 vehicles 共用，並透過 parameters 切換 behavior：role、vehicle ID、PX4 namespace 和 formation slot。
-- Vehicle namespace convention 是穩定且 role-independent 的：`/vehicle_1` 是第一版 leader，`/vehicle_2` 是 follower-left slot 1，`/vehicle_3` 是 follower-right slot 2，而 `/swarm` 是 swarm-level namespace。
+- Vehicle namespace convention 是穩定且 role-independent 的：`/MAV1` 是第一版 leader，`/MAV2` 是 follower-left slot 1，`/MAV3` 是 follower-right slot 2，而 `/swarm` 是 swarm-level namespace。
 - 不要使用 `leader` 作為 vehicle namespace。Leadership 是 role parameter，讓未來 leader reassignment 不需要重新命名 topics。
 - ground-station node 擁有 operator-facing action interface、mission-level state、swarm monitoring、leader goal publication、formation-mode publication、whole-swarm takeoff/land、pause 和 failsafe commands。
 - ground-station node 不計算 continuous follower setpoints。Follower setpoint generation 分散在每個 follower vehicle node 中。
@@ -111,8 +111,8 @@ Micro XRCE-DDS Agent 視為外部 ROS 2-PX4 bridge。ROS 2 package 應透過 `px
 - Followers 不直接接收 operator movement goals。使用者 movement intent 只透過 leader state 和 formation mode 到達 followers。
 - 第一版 followers 不命令彼此，也不做 follower-follower coordination。
 - 第一版 follower slots 是固定的。Dynamic slot assignment 延後。
-- `vehicle_2` 必須以 follower-left slot 1 開始，且它的初始 staging position 必須在 leader 左側。
-- `vehicle_3` 必須以 follower-right slot 2 開始，且它的初始 staging position 必須在 leader 右側。
+- `MAV2` 必須以 follower-left slot 1 開始，且它的初始 staging position 必須在 leader 左側。
+- `MAV3` 必須以 follower-right slot 2 開始，且它的初始 staging position 必須在 leader 右側。
 - Left/right staging directions 相對於 leader initial yaw/heading 定義。Staging points 是由該 initial heading 推導出的 world-frame positions。
 - Takeoff、landing 和 staging 使用 world-frame positions 來降低碰撞風險。
 - Cruise/follow formation 使用 leader body-frame offsets，讓 slots 隨目前 leader yaw/heading 旋轉。

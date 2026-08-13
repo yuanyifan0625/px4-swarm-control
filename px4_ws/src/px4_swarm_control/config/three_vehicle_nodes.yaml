@@ -1,9 +1,9 @@
 # First-version fixed role/namespace/slot layout for manual ticket 05 checks.
-vehicle_1:
+MAV1:
   ros__parameters:
     role: leader
-    vehicle_id: vehicle_1
-    px4_namespace: /vehicle_1
+    vehicle_id: MAV1
+    px4_namespace: /MAV1
     px4_target_system: 2
     slot: leader
     control_loop_hz: 20.0
@@ -14,11 +14,11 @@ vehicle_1:
     hold_z: -2.0
     hold_yaw: 0.0
 
-vehicle_2:
+MAV2:
   ros__parameters:
     role: follower
-    vehicle_id: vehicle_2
-    px4_namespace: /vehicle_2
+    vehicle_id: MAV2
+    px4_namespace: /MAV2
     px4_target_system: 3
     slot: follower_left
     control_loop_hz: 20.0
@@ -29,11 +29,11 @@ vehicle_2:
     hold_z: -2.0
     hold_yaw: 0.0
 
-vehicle_3:
+MAV3:
   ros__parameters:
     role: follower
-    vehicle_id: vehicle_3
-    px4_namespace: /vehicle_3
+    vehicle_id: MAV3
+    px4_namespace: /MAV3
     px4_target_system: 4
     slot: follower_right
     control_loop_hz: 20.0

@@ -36,8 +36,8 @@ FIRST_VERSION_VEHICLES: Tuple[
     VehicleBridgeExpectation,
 ] = (
     VehicleBridgeExpectation(
-        'vehicle_1',
-        '/vehicle_1',
+        'MAV1',
+        '/MAV1',
         1,
         2,
         'x500_1',
@@ -46,8 +46,8 @@ FIRST_VERSION_VEHICLES: Tuple[
         None,
     ),
     VehicleBridgeExpectation(
-        'vehicle_2',
-        '/vehicle_2',
+        'MAV2',
+        '/MAV2',
         2,
         3,
         'x500_2',
@@ -56,8 +56,8 @@ FIRST_VERSION_VEHICLES: Tuple[
         '0,2,0',
     ),
     VehicleBridgeExpectation(
-        'vehicle_3',
-        '/vehicle_3',
+        'MAV3',
+        '/MAV3',
         3,
         4,
         'x500_3',
@@ -66,6 +66,9 @@ FIRST_VERSION_VEHICLES: Tuple[
         '0,-2,0',
     ),
 )
+
+
+FIRST_VERSION_LEADER = FIRST_VERSION_VEHICLES[0]
 
 
 FIRST_VERSION_BY_VEHICLE_ID = {

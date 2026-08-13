@@ -68,14 +68,14 @@ cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 action list | grep /swarm
-ros2 topic list | grep -E '/swarm/leader_goal|/swarm/move_leader|/vehicle_[123]/status'
+ros2 topic list | grep -E '/swarm/leader_goal|/swarm/move_leader|/MAV[123]/status'
 ```
 
 通過條件：
 
 - actions 包含 `/swarm/takeoff`、`/swarm/move_leader`、`/swarm/land`
 - topics 包含 `/swarm/leader_goal`
-- topics 包含 `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status`
+- topics 包含 `/MAV1/status`、`/MAV2/status`、`/MAV3/status`
 
 ## 3. TakeoffSwarm 到 staging
 
@@ -90,18 +90,18 @@ ros2 action send_goal /swarm/takeoff \ px4_swarm_interfaces/action/TakeoffSwarm 
 - message 是 `all vehicles reached staging positions`
 - 三台 status 都是 fresh telemetry
 - 三台都到 staging：
-  - `vehicle_1`: 約 `(0, 0, -5)`
-  - `vehicle_2`: 約 `(-3, 4, -5)`
-  - `vehicle_3`: 約 `(-3, -4, -5)`
+  - `MAV1`: 約 `(0, 0, -5)`
+  - `MAV2`: 約 `(-3, 4, -5)`
+  - `MAV3`: 約 `(-3, -4, -5)`
 
 ## 4. 記錄 MoveLeader 前的 follower 位置
 
 ```bash
-ros2 topic echo --once /vehicle_2/status
-ros2 topic echo --once /vehicle_3/status
+ros2 topic echo --once /MAV2/status
+ros2 topic echo --once /MAV3/status
 ```
 
-記下 `vehicle_2` 和 `vehicle_3` 的 `x/y/z/yaw`，後面用來確認 followers 沒有跟著 leader goal 移動。
+記下 `MAV2` 和 `MAV3` 的 `x/y/z/yaw`，後面用來確認 followers 沒有跟著 leader goal 移動。
 
 ## 5. 送出 MoveLeader
 
@@ -125,21 +125,21 @@ message: leader reached target
 ## 6. 確認只有 leader 移動
 
 ```bash
-ros2 topic echo --once /vehicle_1/status
-ros2 topic echo --once /vehicle_2/status
-ros2 topic echo --once /vehicle_3/status
+ros2 topic echo --once /MAV1/status
+ros2 topic echo --once /MAV2/status
+ros2 topic echo --once /MAV3/status
 ```
 
 通過條件：
 
-- `vehicle_1` 接近 MoveLeader 目標：
+- `MAV1` 接近 MoveLeader 目標：
   - `x ~= 2.0`
   - `y ~= 0.0`
   - `z ~= -5.0`
   - `yaw ~= 0.5`
-- `vehicle_1` 的 `vehicle_state` 應是 `following` 或仍在 Offboard control 下的等價狀態。
-- `vehicle_2` 和 `vehicle_3` 不應追 `/swarm/leader_goal`。
-- `vehicle_2` 和 `vehicle_3` 應大致維持 staging/holding 位置，不會移動到 `(2.0, 0.0, -5.0)`。
+- `MAV1` 的 `vehicle_state` 應是 `following` 或仍在 Offboard control 下的等價狀態。
+- `MAV2` 和 `MAV3` 不應追 `/swarm/leader_goal`。
+- `MAV2` 和 `MAV3` 應大致維持 staging/holding 位置，不會移動到 `(2.0, 0.0, -5.0)`。
 
 這一步保護 distributed follower-control 邊界：ticket 08 只能移動 leader；followers 要等 ticket 09 才能根據 leader state 和 formation mode 本地計算跟隨 setpoint。
 

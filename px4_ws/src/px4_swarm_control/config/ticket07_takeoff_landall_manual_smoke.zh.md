@@ -19,7 +19,7 @@ TakeoffSwarm -> LandSwarm -> TakeoffSwarm -> LandSwarm
 - QGC 關閉；QGC 只能作為 optional monitoring，不是第一版控制入口。
 - `MicroXRCEAgent udp4 -p 8888` 正在執行。
 - Gazebo 中可以看到 `x500_1`、`x500_2`、`x500_3`。
-- 三台 PX4 instance 已用 `/vehicle_1`、`/vehicle_2`、`/vehicle_3` namespace 接到同一個 Micro XRCE-DDS Agent。
+- 三台 PX4 instance 已用 `/MAV1`、`/MAV2`、`/MAV3` namespace 接到同一個 Micro XRCE-DDS Agent。
 - 專案已 build：
 
 ```bash
@@ -90,47 +90,47 @@ pgrep -af 'ground_station_node|vehicle_node'
 
 ## 3. 啟動三個 vehicle node
 
-Terminal vehicle_1：
+Terminal MAV1：
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 run px4_swarm_control vehicle_node --ros-args \
-  -r __ns:=/vehicle_1 \
+  -r __ns:=/MAV1 \
   -p role:=leader \
-  -p vehicle_id:=vehicle_1 \
-  -p px4_namespace:=/vehicle_1 \
+  -p vehicle_id:=MAV1 \
+  -p px4_namespace:=/MAV1 \
   -p px4_target_system:=2 \
   -p slot:=leader
 ```
 
-Terminal vehicle_2：
+Terminal MAV2：
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 run px4_swarm_control vehicle_node --ros-args \
-  -r __ns:=/vehicle_2 \
+  -r __ns:=/MAV2 \
   -p role:=follower \
-  -p vehicle_id:=vehicle_2 \
-  -p px4_namespace:=/vehicle_2 \
+  -p vehicle_id:=MAV2 \
+  -p px4_namespace:=/MAV2 \
   -p px4_target_system:=3 \
   -p slot:=follower_left
 ```
 
-Terminal vehicle_3：
+Terminal MAV3：
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 run px4_swarm_control vehicle_node --ros-args \
-  -r __ns:=/vehicle_3 \
+  -r __ns:=/MAV3 \
   -p role:=follower \
-  -p vehicle_id:=vehicle_3 \
-  -p px4_namespace:=/vehicle_3 \
+  -p vehicle_id:=MAV3 \
+  -p px4_namespace:=/MAV3 \
   -p px4_target_system:=4 \
   -p slot:=follower_right
 ```
@@ -151,14 +151,14 @@ cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 action list | grep /swarm
-ros2 topic list | grep -E '/swarm|/vehicle_[123]/staging_setpoint|/vehicle_[123]/status'
+ros2 topic list | grep -E '/swarm|/MAV[123]/staging_setpoint|/MAV[123]/status'
 ```
 
 通過條件：
 
 - actions 包含 `/swarm/takeoff` 和 `/swarm/land`
-- topics 包含 `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status`
-- topics 包含 `/vehicle_1/staging_setpoint`、`/vehicle_2/staging_setpoint`、`/vehicle_3/staging_setpoint`
+- topics 包含 `/MAV1/status`、`/MAV2/status`、`/MAV3/status`
+- topics 包含 `/MAV1/staging_setpoint`、`/MAV2/staging_setpoint`、`/MAV3/staging_setpoint`
 
 ## 5. 第一次 TakeoffSwarm
 
@@ -188,9 +188,9 @@ message: all vehicles reached staging positions
 ## 6. 檢查 staging status
 
 ```bash
-ros2 topic echo --once /vehicle_1/status
-ros2 topic echo --once /vehicle_2/status
-ros2 topic echo --once /vehicle_3/status
+ros2 topic echo --once /MAV1/status
+ros2 topic echo --once /MAV2/status
+ros2 topic echo --once /MAV3/status
 ```
 
 通過條件：
@@ -200,16 +200,16 @@ ros2 topic echo --once /vehicle_3/status
 - 三台 `nav_state: offboard`。
 - 三台 `vehicle_state: staging`。
 - 位置接近：
-  - `vehicle_1`: `x ~= 0.0`, `y ~= 0.0`, `z ~= -5.0`
-  - `vehicle_2`: `x ~= -3.0`, `y ~= 4.0`, `z ~= -5.0`
-  - `vehicle_3`: `x ~= -3.0`, `y ~= -4.0`, `z ~= -5.0`
+  - `MAV1`: `x ~= 0.0`, `y ~= 0.0`, `z ~= -5.0`
+  - `MAV2`: `x ~= -3.0`, `y ~= 4.0`, `z ~= -5.0`
+  - `MAV3`: `x ~= -3.0`, `y ~= -4.0`, `z ~= -5.0`
 
 本次驗證觀察到的第二輪 staging 範例：
 
 ```text
-vehicle_1: x=0.001,  y=0.006,  z=-5.005, nav_state=offboard, vehicle_state=staging
-vehicle_2: x=-2.990, y=3.984,  z=-5.004, nav_state=offboard, vehicle_state=staging
-vehicle_3: x=-2.997, y=-3.998, z=-5.008, nav_state=offboard, vehicle_state=staging
+MAV1: x=0.001,  y=0.006,  z=-5.005, nav_state=offboard, vehicle_state=staging
+MAV2: x=-2.990, y=3.984,  z=-5.004, nav_state=offboard, vehicle_state=staging
+MAV3: x=-2.997, y=-3.998, z=-5.008, nav_state=offboard, vehicle_state=staging
 ```
 
 ## 7. 第一次 LandSwarm
@@ -240,9 +240,9 @@ swarm mission landing -> done: all vehicles reported landed
 ## 8. 檢查 landed status
 
 ```bash
-ros2 topic echo --once /vehicle_1/status
-ros2 topic echo --once /vehicle_2/status
-ros2 topic echo --once /vehicle_3/status
+ros2 topic echo --once /MAV1/status
+ros2 topic echo --once /MAV2/status
+ros2 topic echo --once /MAV3/status
 ```
 
 通過條件：
@@ -289,9 +289,9 @@ ros2 action send_goal /swarm/land px4_swarm_interfaces/action/LandSwarm \
 本次驗證觀察到的最終 landed 範例：
 
 ```text
-vehicle_1: z=0.025,  armed=false, vehicle_state=landed
-vehicle_2: z=-0.062, armed=false, vehicle_state=landed
-vehicle_3: z=0.001,  armed=false, vehicle_state=landed
+MAV1: z=0.025,  armed=false, vehicle_state=landed
+MAV2: z=-0.062, armed=false, vehicle_state=landed
+MAV3: z=0.001,  armed=false, vehicle_state=landed
 ```
 
 ## 整體通過條件
@@ -307,7 +307,7 @@ TakeoffSwarm -> LandSwarm -> TakeoffSwarm -> LandSwarm
 - 兩次 `TakeoffSwarm` 都只送一次 action。
 - 兩次 `TakeoffSwarm` 都等三台真的抵達 staging 後才回 `success: true`。
 - 兩次 `LandSwarm` 都等三台真的 landed 後才回 `success: true`。
-- Gazebo 畫面、PX4 telemetry、`/vehicle_*/status` 在每個 milestone 都一致。
+- Gazebo 畫面、PX4 telemetry、`/MAV*/status` 在每個 milestone 都一致。
 
 ## 本次修正重點
 

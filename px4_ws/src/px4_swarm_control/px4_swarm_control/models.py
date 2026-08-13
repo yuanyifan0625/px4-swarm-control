@@ -124,7 +124,7 @@ class VehicleCommandResult:
 def default_vehicle_configs() -> Tuple[VehicleConfig, VehicleConfig, VehicleConfig]:
     """Return the fixed first-version vehicle role and slot assignments."""
     return (
-        VehicleConfig('vehicle_1', '/vehicle_1', VehicleRole.LEADER, Slot.LEADER),
-        VehicleConfig('vehicle_2', '/vehicle_2', VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
-        VehicleConfig('vehicle_3', '/vehicle_3', VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
+        VehicleConfig('MAV1', '/MAV1', VehicleRole.LEADER, Slot.LEADER),
+        VehicleConfig('MAV2', '/MAV2', VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
+        VehicleConfig('MAV3', '/MAV3', VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
     )

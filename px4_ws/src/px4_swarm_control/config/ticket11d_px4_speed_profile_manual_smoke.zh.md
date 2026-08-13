@@ -45,19 +45,19 @@ docker compose exec ros2_jazzy bash -lc "MicroXRCEAgent udp4 -p 8888 | tee /tmp/
 Terminal PX4-1：
 
 ```bash
-docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/PX4-Autopilot && PX4_GZ_NO_FOLLOW=1 PX4_UXRCE_DDS_NS=vehicle_1 PX4_SYS_AUTOSTART=4001 PX4_SIM_MODEL=gz_x500 ./build/px4_sitl_default/bin/px4 -i 1"
+docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/PX4-Autopilot && PX4_GZ_NO_FOLLOW=1 PX4_UXRCE_DDS_NS=MAV1 PX4_SYS_AUTOSTART=4001 PX4_SIM_MODEL=gz_x500 ./build/px4_sitl_default/bin/px4 -i 1"
 ```
 
 Terminal PX4-2：
 
 ```bash
-docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/PX4-Autopilot && PX4_GZ_NO_FOLLOW=1 PX4_UXRCE_DDS_NS=vehicle_2 PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 PX4_GZ_MODEL_POSE='0,2,0' PX4_SIM_MODEL=gz_x500 ./build/px4_sitl_default/bin/px4 -i 2"
+docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/PX4-Autopilot && PX4_GZ_NO_FOLLOW=1 PX4_UXRCE_DDS_NS=MAV2 PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 PX4_GZ_MODEL_POSE='0,2,0' PX4_SIM_MODEL=gz_x500 ./build/px4_sitl_default/bin/px4 -i 2"
 ```
 
 Terminal PX4-3：
 
 ```bash
-docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/PX4-Autopilot && PX4_GZ_NO_FOLLOW=1 PX4_UXRCE_DDS_NS=vehicle_3 PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 PX4_GZ_MODEL_POSE='0,-2,0' PX4_SIM_MODEL=gz_x500 ./build/px4_sitl_default/bin/px4 -i 3"
+docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/PX4-Autopilot && PX4_GZ_NO_FOLLOW=1 PX4_UXRCE_DDS_NS=MAV3 PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 PX4_GZ_MODEL_POSE='0,-2,0' PX4_SIM_MODEL=gz_x500 ./build/px4_sitl_default/bin/px4 -i 3"
 ```
 
 ## 3. 產生 check 指令
@@ -99,5 +99,5 @@ docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/px4_ws &&
 通過條件：
 
 - Gazebo 看到三台飛機起飛、leader 移動、yaw 轉向、vee/line_abreast 切換、回到 home、最後降落。
-- `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status` 最後都顯示 `vehicle_state: landed`、`armed: false`。
+- `/MAV1/status`、`/MAV2/status`、`/MAV3/status` 最後都顯示 `vehicle_state: landed`、`armed: false`。
 - `operator_console` demo 沒有直接發布 follower absolute target；followers 仍只靠 leader status 與 formation mode 計算 setpoint。

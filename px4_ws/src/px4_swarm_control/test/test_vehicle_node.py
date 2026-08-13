@@ -86,8 +86,8 @@ def test_parse_vehicle_node_config_accepts_leader_and_follower_values():
     leader = parse_vehicle_node_config(
         {
             'role': 'leader',
-            'vehicle_id': 'vehicle_1',
-            'px4_namespace': '/vehicle_1',
+            'vehicle_id': 'MAV1',
+            'px4_namespace': '/MAV1',
             'slot': 'leader',
             'control_loop_hz': 20.0,
             'hold_x': 1.0,
@@ -99,8 +99,8 @@ def test_parse_vehicle_node_config_accepts_leader_and_follower_values():
     follower = parse_vehicle_node_config(
         {
             'role': 'follower',
-            'vehicle_id': 'vehicle_2',
-            'px4_namespace': 'vehicle_2',
+            'vehicle_id': 'MAV2',
+            'px4_namespace': 'MAV2',
             'slot': 'follower_left',
         },
     )
@@ -110,7 +110,7 @@ def test_parse_vehicle_node_config_accepts_leader_and_follower_values():
     assert leader.px4_target_system == 2
     assert leader.hold_setpoint == PositionYawSetpoint(1.0, 2.0, -3.0, 0.5)
     assert follower.role is VehicleRole.FOLLOWER
-    assert follower.px4_namespace == '/vehicle_2'
+    assert follower.px4_namespace == '/MAV2'
     assert follower.px4_target_system == 3
     assert follower.slot is Slot.FOLLOWER_LEFT
 
@@ -130,10 +130,10 @@ def test_parse_vehicle_node_config_rejects_invalid_role_slot_and_rate():
 
 def test_parse_vehicle_node_config_rejects_swapped_vehicle_namespace_mapping():
     for values in (
-        {'vehicle_id': 'vehicle_2', 'px4_namespace': '/vehicle_3', 'slot': 'follower_left'},
-        {'vehicle_id': 'vehicle_2', 'px4_namespace': '/vehicle_2', 'slot': 'follower_right'},
-        {'vehicle_id': 'vehicle_2', 'px4_namespace': '/vehicle_2', 'px4_target_system': 4, 'slot': 'follower_left'},
-        {'vehicle_id': 'vehicle_3', 'px4_namespace': '/vehicle_3', 'role': 'leader'},
+        {'vehicle_id': 'MAV2', 'px4_namespace': '/MAV3', 'slot': 'follower_left'},
+        {'vehicle_id': 'MAV2', 'px4_namespace': '/MAV2', 'slot': 'follower_right'},
+        {'vehicle_id': 'MAV2', 'px4_namespace': '/MAV2', 'px4_target_system': 4, 'slot': 'follower_left'},
+        {'vehicle_id': 'MAV3', 'px4_namespace': '/MAV3', 'role': 'leader'},
     ):
         try:
             parse_vehicle_node_config(values)
@@ -155,9 +155,9 @@ def test_default_vehicle_node_configs_match_first_version_three_vehicle_layout()
         )
         for config in configs
     ] == [
-        ('vehicle_1', '/vehicle_1', 2, VehicleRole.LEADER, Slot.LEADER),
-        ('vehicle_2', '/vehicle_2', 3, VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
-        ('vehicle_3', '/vehicle_3', 4, VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
+        ('MAV1', '/MAV1', 2, VehicleRole.LEADER, Slot.LEADER),
+        ('MAV2', '/MAV2', 3, VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
+        ('MAV3', '/MAV3', 4, VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
     ]
 
 
@@ -165,8 +165,8 @@ def test_leader_goal_updates_only_leader_setpoint():
     leader_core = make_core(
         VehicleNodeConfig(
             role=VehicleRole.LEADER,
-            vehicle_id='vehicle_1',
-            px4_namespace='/vehicle_1',
+            vehicle_id='MAV1',
+            px4_namespace='/MAV1',
             px4_target_system=2,
             slot=Slot.LEADER,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
@@ -175,8 +175,8 @@ def test_leader_goal_updates_only_leader_setpoint():
     follower_core = make_core(
         VehicleNodeConfig(
             role=VehicleRole.FOLLOWER,
-            vehicle_id='vehicle_2',
-            px4_namespace='/vehicle_2',
+            vehicle_id='MAV2',
+            px4_namespace='/MAV2',
             px4_target_system=3,
             slot=Slot.FOLLOWER_LEFT,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
@@ -193,7 +193,7 @@ def test_leader_goal_updates_only_leader_setpoint():
 
     assert leader_core.active_setpoint == PositionYawSetpoint(4.0, 5.0, -6.0, 0.7)
     assert follower_core.active_setpoint == follower_core.config.hold_setpoint
-    assert follower_core.logger.warnings == ['follower vehicle_2 ignored leader goal']
+    assert follower_core.logger.warnings == ['follower MAV2 ignored leader goal']
 
 
 def test_leader_goal_moves_leader_in_following_state():
@@ -217,8 +217,8 @@ def test_follower_ignores_leader_goal_and_waits_for_leader_status():
     core = make_core(
         config=VehicleNodeConfig(
             role=VehicleRole.FOLLOWER,
-            vehicle_id='vehicle_2',
-            px4_namespace='/vehicle_2',
+            vehicle_id='MAV2',
+            px4_namespace='/MAV2',
             px4_target_system=3,
             slot=Slot.FOLLOWER_LEFT,
             hold_setpoint=PositionYawSetpoint(-3.0, 4.0, -5.0, 0.0),
@@ -242,7 +242,7 @@ def test_follower_ignores_leader_goal_and_waits_for_leader_status():
 def test_follower_left_derives_vee_setpoint_from_fresh_leader_status():
     px4_interface = FakePx4Interface()
     core = make_core(
-        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
 
@@ -256,7 +256,7 @@ def test_follower_left_derives_vee_setpoint_from_fresh_leader_status():
 def test_follower_right_derives_vee_setpoint_from_fresh_leader_status():
     px4_interface = FakePx4Interface()
     core = make_core(
-        config=follower_config('vehicle_3', Slot.FOLLOWER_RIGHT),
+        config=follower_config('MAV3', Slot.FOLLOWER_RIGHT),
         px4_interface=px4_interface,
     )
 
@@ -270,7 +270,7 @@ def test_follower_right_derives_vee_setpoint_from_fresh_leader_status():
 def test_follower_uses_current_formation_mode_topic_for_local_offset():
     px4_interface = FakePx4Interface()
     core = make_core(
-        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
     mode = FormationMode()
@@ -286,7 +286,7 @@ def test_follower_uses_current_formation_mode_topic_for_local_offset():
 def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
     px4_interface = FakePx4Interface()
     core = make_core(
-        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
     mode = FormationMode()
@@ -302,7 +302,7 @@ def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
 def test_follower_holds_when_leader_status_is_stale():
     px4_interface = FakePx4Interface()
     core = make_core(
-        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
 
@@ -319,7 +319,7 @@ def test_follower_holds_when_leader_status_is_stale():
 def test_follower_holds_while_leader_is_only_staged_not_following():
     px4_interface = FakePx4Interface()
     core = make_core(
-        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
 
@@ -396,7 +396,7 @@ def test_pause_holds_safe_setpoint_until_resume_without_continuing_old_leader_go
 def test_follower_pause_resume_waits_for_fresh_following_leader_before_following_again():
     px4_interface = FakePx4Interface()
     core = make_core(
-        config=follower_config('vehicle_2', Slot.FOLLOWER_LEFT),
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
     core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
@@ -496,7 +496,7 @@ def test_takeoff_command_waits_until_staging_setpoint_has_arrived():
     assert px4_interface.takeoff_altitudes == []
     assert core.vehicle_level_state is VehicleLevelState.ARMING
     assert logger.infos[-1] == (
-        'vehicle_1 received takeoff before staging setpoint; waiting for staging target'
+        'MAV1 received takeoff before staging setpoint; waiting for staging target'
     )
 
     core.handle_staging_setpoint(staging_setpoint(z=-5.0, yaw=0.25))
@@ -854,7 +854,7 @@ def test_takeoff_sequence_ignores_grounded_landed_telemetry_until_airborne():
 
 def test_publish_status_uses_internal_vehicle_state_when_available():
     state = VehicleState(
-        vehicle_id='vehicle_2',
+        vehicle_id='MAV2',
         position=(1.0, 2.0, -3.0),
         yaw=0.4,
         velocity=(0.1, 0.2, -0.3),
@@ -868,8 +868,8 @@ def test_publish_status_uses_internal_vehicle_state_when_available():
     core = make_core(
         config=VehicleNodeConfig(
             role=VehicleRole.FOLLOWER,
-            vehicle_id='vehicle_2',
-            px4_namespace='/vehicle_2',
+            vehicle_id='MAV2',
+            px4_namespace='/MAV2',
             px4_target_system=3,
             slot=Slot.FOLLOWER_LEFT,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
@@ -883,7 +883,7 @@ def test_publish_status_uses_internal_vehicle_state_when_available():
     msg = status_publisher.messages[-1]
     assert msg.vehicle_id == 2
     assert msg.role == 'follower'
-    assert msg.px4_namespace == '/vehicle_2'
+    assert msg.px4_namespace == '/MAV2'
     assert msg.slot == 'follower_left'
     assert (msg.x, msg.y, msg.z, msg.yaw) == (1.0, 2.0, -3.0, 0.4)
     assert (msg.vx, msg.vy, msg.vz) == (0.1, 0.2, -0.3)
@@ -896,7 +896,7 @@ def test_publish_status_uses_internal_vehicle_state_when_available():
 
 def test_publish_status_drops_mismatched_interface_vehicle_state():
     state = VehicleState(
-        vehicle_id='vehicle_3',
+        vehicle_id='MAV3',
         position=(9.0, 8.0, -7.0),
         yaw=0.4,
         velocity=(0.1, 0.2, -0.3),
@@ -911,8 +911,8 @@ def test_publish_status_drops_mismatched_interface_vehicle_state():
     core = make_core(
         config=VehicleNodeConfig(
             role=VehicleRole.FOLLOWER,
-            vehicle_id='vehicle_2',
-            px4_namespace='/vehicle_2',
+            vehicle_id='MAV2',
+            px4_namespace='/MAV2',
             px4_target_system=3,
             slot=Slot.FOLLOWER_LEFT,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
@@ -926,7 +926,7 @@ def test_publish_status_drops_mismatched_interface_vehicle_state():
 
     assert status_publisher.messages == []
     assert logger.warnings == [
-        'vehicle_2 ignored telemetry for vehicle_3 from /vehicle_2',
+        'MAV2 ignored telemetry for MAV3 from /MAV2',
     ]
 
 
@@ -938,11 +938,11 @@ def test_state_transition_logging_is_not_repeated_for_same_state():
     core.transition_to(VehicleLevelState.HOLDING, 'test')
 
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
-    assert logger.infos == ['vehicle_1 state idle -> holding: test']
+    assert logger.infos == ['MAV1 state idle -> holding: test']
 
 
 def test_vehicle_id_to_uint8_extracts_numeric_suffix():
-    assert vehicle_id_to_uint8('vehicle_3') == 3
+    assert vehicle_id_to_uint8('MAV3') == 3
     assert vehicle_id_to_uint8('7') == 7
 
 
@@ -956,7 +956,7 @@ def vehicle_state(
     vehicle_level_state=VehicleLevelState.HOLDING,
 ):
     return VehicleState(
-        vehicle_id='vehicle_1',
+        vehicle_id='MAV1',
         position=(0.0, 0.0, z),
         yaw=0.0,
         velocity=(0.0, 0.0, 0.0),
@@ -983,8 +983,8 @@ def make_core(config=None, px4_interface=None, status_publisher=None, logger=Non
     if config is None:
         config = VehicleNodeConfig(
             role=VehicleRole.LEADER,
-            vehicle_id='vehicle_1',
-            px4_namespace='/vehicle_1',
+            vehicle_id='MAV1',
+            px4_namespace='/MAV1',
             px4_target_system=2,
             slot=Slot.LEADER,
             hold_setpoint=PositionYawSetpoint(0.0, 0.0, -2.0, 0.0),
@@ -999,7 +999,7 @@ def make_core(config=None, px4_interface=None, status_publisher=None, logger=Non
 
 
 def follower_config(vehicle_id, slot):
-    target_system = 3 if vehicle_id == 'vehicle_2' else 4
+    target_system = 3 if vehicle_id == 'MAV2' else 4
     return VehicleNodeConfig(
         role=VehicleRole.FOLLOWER,
         vehicle_id=vehicle_id,

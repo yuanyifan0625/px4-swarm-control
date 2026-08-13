@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from px4_swarm_control.bridge_config import (
     FIRST_VERSION_BY_VEHICLE_ID,
+    FIRST_VERSION_LEADER,
     FIRST_VERSION_VEHICLES,
 )
 from px4_swarm_control.follower_controller import (
@@ -453,7 +454,7 @@ class VehicleNode(Node):
         if self.config.role is VehicleRole.FOLLOWER:
             self.leader_status_subscription = self.create_subscription(
                 SwarmVehicleStatus,
-                '/vehicle_1/status',
+                f'{FIRST_VERSION_LEADER.namespace}/status',
                 self.core.handle_leader_status,
                 10,
             )
@@ -474,8 +475,8 @@ class VehicleNode(Node):
 
     def _declare_parameters(self) -> None:
         self.declare_parameter('role', 'leader')
-        self.declare_parameter('vehicle_id', 'vehicle_1')
-        self.declare_parameter('px4_namespace', '/vehicle_1')
+        self.declare_parameter('vehicle_id', FIRST_VERSION_LEADER.vehicle_id)
+        self.declare_parameter('px4_namespace', FIRST_VERSION_LEADER.namespace)
         self.declare_parameter('px4_target_system', 2)
         self.declare_parameter('slot', 'leader')
         self.declare_parameter('control_loop_hz', 20.0)
@@ -547,9 +548,9 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
 
     config = VehicleNodeConfig(
         role=role,
-        vehicle_id=str(values.get('vehicle_id', 'vehicle_1')),
+        vehicle_id=str(values.get('vehicle_id', FIRST_VERSION_LEADER.vehicle_id)),
         px4_namespace=_normalize_namespace(
-            str(values.get('px4_namespace', '/vehicle_1')),
+            str(values.get('px4_namespace', FIRST_VERSION_LEADER.namespace)),
         ),
         px4_target_system=_target_system_for_values(values),
         slot=slot,
@@ -582,8 +583,8 @@ def default_vehicle_node_configs() -> Tuple[
         parse_vehicle_node_config(
             {
                 'role': 'leader',
-                'vehicle_id': 'vehicle_1',
-                'px4_namespace': '/vehicle_1',
+                'vehicle_id': 'MAV1',
+                'px4_namespace': '/MAV1',
                 'px4_target_system': 2,
                 'slot': 'leader',
             },
@@ -591,8 +592,8 @@ def default_vehicle_node_configs() -> Tuple[
         parse_vehicle_node_config(
             {
                 'role': 'follower',
-                'vehicle_id': 'vehicle_2',
-                'px4_namespace': '/vehicle_2',
+                'vehicle_id': 'MAV2',
+                'px4_namespace': '/MAV2',
                 'px4_target_system': 3,
                 'slot': 'follower_left',
             },
@@ -600,8 +601,8 @@ def default_vehicle_node_configs() -> Tuple[
         parse_vehicle_node_config(
             {
                 'role': 'follower',
-                'vehicle_id': 'vehicle_3',
-                'px4_namespace': '/vehicle_3',
+                'vehicle_id': 'MAV3',
+                'px4_namespace': '/MAV3',
                 'px4_target_system': 4,
                 'slot': 'follower_right',
             },
@@ -624,7 +625,7 @@ def _target_system_for_values(values: Dict[str, Any]) -> int:
         target_system = int(values['px4_target_system'])
     else:
         expectation = FIRST_VERSION_BY_VEHICLE_ID.get(
-            str(values.get('vehicle_id', 'vehicle_1')),
+            str(values.get('vehicle_id', FIRST_VERSION_LEADER.vehicle_id)),
         )
         target_system = expectation.px4_target_system if expectation else -1
     if target_system < 0 or target_system > 255:

@@ -101,29 +101,29 @@ def test_diff_report_shows_current_desired_and_match_state():
         parameters={'MPC_XY_VEL_MAX': 2.0, 'MPC_ACC_HOR': 2.0},
     )
     current_values = {
-        'vehicle_1': {'MPC_XY_VEL_MAX': 2.0, 'MPC_ACC_HOR': 4.0},
-        'vehicle_2': {'MPC_XY_VEL_MAX': 12.0, 'MPC_ACC_HOR': 2.0},
+        'MAV1': {'MPC_XY_VEL_MAX': 2.0, 'MPC_ACC_HOR': 4.0},
+        'MAV2': {'MPC_XY_VEL_MAX': 12.0, 'MPC_ACC_HOR': 2.0},
     }
 
     rows = diff_profile(profile, current_values)
     report = render_diff_report(rows)
 
-    assert rows[0].vehicle_id == 'vehicle_1'
+    assert rows[0].vehicle_id == 'MAV1'
     assert rows[0].parameter == 'MPC_XY_VEL_MAX'
     assert rows[0].matches is True
     assert rows[1].parameter == 'MPC_ACC_HOR'
     assert rows[1].matches is False
-    assert 'vehicle_1 MPC_XY_VEL_MAX current=2.0 desired=2.0 match=yes' in report
-    assert 'vehicle_2 MPC_XY_VEL_MAX current=12.0 desired=2.0 match=no' in report
+    assert 'MAV1 MPC_XY_VEL_MAX current=2.0 desired=2.0 match=yes' in report
+    assert 'MAV2 MPC_XY_VEL_MAX current=12.0 desired=2.0 match=no' in report
 
 
 def test_load_current_values_from_yaml(tmp_path):
     current_path = tmp_path / 'current.yaml'
     current_path.write_text(
         '''
-vehicle_1:
+MAV1:
   MPC_XY_VEL_MAX: 2.0
-vehicle_2:
+MAV2:
   MPC_XY_VEL_MAX: "12.0"
 ''',
         encoding='utf-8',
@@ -132,8 +132,8 @@ vehicle_2:
     values = load_current_values(current_path)
 
     assert values == {
-        'vehicle_1': {'MPC_XY_VEL_MAX': 2.0},
-        'vehicle_2': {'MPC_XY_VEL_MAX': 12.0},
+        'MAV1': {'MPC_XY_VEL_MAX': 2.0},
+        'MAV2': {'MPC_XY_VEL_MAX': 12.0},
     }
 
 
@@ -158,7 +158,7 @@ def test_check_mode_reads_current_values_without_applying():
     )
     client = FakeClient()
 
-    rows = check_profile(profile, {'vehicle_1': client})
+    rows = check_profile(profile, {'MAV1': client})
 
     assert rows[0].current == 12.0
     assert rows[0].desired == 2.0

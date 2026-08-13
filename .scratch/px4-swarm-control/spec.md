@@ -45,9 +45,9 @@ The first milestone should validate the complete foundation before formation fol
 16. As the operator, I want the ground station to report when formation is established, so that I know the system entered formation behavior.
 17. As the developer, I want each vehicle represented by one parameterized `vehicle_node`, so that leader and follower behavior share one implementation shape.
 18. As the developer, I want `role`, `vehicle_id`, `px4_namespace`, and `slot` parameters, so that one executable can represent all three vehicles.
-19. As the developer, I want `vehicle_1` to be the leader namespace, so that the first version has a stable, inspectable leader assignment.
-20. As the developer, I want `vehicle_2` to be follower-left slot 1, so that slot naming matches the vehicle's initial geometric position.
-21. As the developer, I want `vehicle_3` to be follower-right slot 2, so that left/right slot assignments are not ambiguous.
+19. As the developer, I want `MAV1` to be the leader namespace, so that the first version has a stable, inspectable leader assignment.
+20. As the developer, I want `MAV2` to be follower-left slot 1, so that slot naming matches the vehicle's initial geometric position.
+21. As the developer, I want `MAV3` to be follower-right slot 2, so that left/right slot assignments are not ambiguous.
 22. As the developer, I want follower-left and follower-right staging positions defined relative to the leader's initial yaw, so that "left" and "right" remain geometrically meaningful.
 23. As the developer, I want staging to use world-frame positions, so that takeoff and landing can be kept collision-resistant.
 24. As the developer, I want formation following to use leader body-frame offsets, so that the formation rotates with leader heading during cruise/follow behavior.
@@ -100,7 +100,7 @@ The first milestone should validate the complete foundation before formation fol
 - New project ROS 2 packages live under the ROS 2 workspace `px4_ws/src/`, not directly under the outer Docker workspace.
 - Runtime topology has four primary ROS 2 nodes: one ground-station node and three instances of a parameterized vehicle node.
 - The vehicle node executable is shared by all three vehicles and switches behavior by parameters: role, vehicle ID, PX4 namespace, and formation slot.
-- Vehicle namespace convention is stable and role-independent: `/vehicle_1` is the first-version leader, `/vehicle_2` is follower-left slot 1, `/vehicle_3` is follower-right slot 2, and `/swarm` is the swarm-level namespace.
+- Vehicle namespace convention is stable and role-independent: `/MAV1` is the first-version leader, `/MAV2` is follower-left slot 1, `/MAV3` is follower-right slot 2, and `/swarm` is the swarm-level namespace.
 - Do not use `leader` as a vehicle namespace. Leadership is a role parameter so that future leader reassignment remains possible without renaming topics.
 - The ground-station node owns the operator-facing action interface, mission-level state, swarm monitoring, leader goal publication, formation-mode publication, whole-swarm takeoff/land, pause, and failsafe commands.
 - The ground-station node does not compute continuous follower setpoints. Follower setpoint generation is distributed into each follower vehicle node.
@@ -111,8 +111,8 @@ The first milestone should validate the complete foundation before formation fol
 - Followers do not directly receive operator movement goals. User movement intent reaches followers only through leader state and formation mode.
 - Followers do not command each other or perform follower-follower coordination in the first version.
 - Follower slots are fixed in the first version. Dynamic slot assignment is deferred.
-- `vehicle_2` must start as follower-left slot 1, and its initial staging position must be on the leader's left side.
-- `vehicle_3` must start as follower-right slot 2, and its initial staging position must be on the leader's right side.
+- `MAV2` must start as follower-left slot 1, and its initial staging position must be on the leader's left side.
+- `MAV3` must start as follower-right slot 2, and its initial staging position must be on the leader's right side.
 - Left/right staging directions are defined relative to the leader's initial yaw/heading. Staging points are computed as world-frame positions derived from that initial heading.
 - Takeoff, landing, and staging use world-frame positions to reduce collision risk.
 - Cruise/follow formation uses leader body-frame offsets so that slots rotate with current leader yaw/heading.

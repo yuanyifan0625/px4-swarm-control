@@ -1,6 +1,6 @@
 # Ticket 10：ChangeFormation 手動 smoke 驗證
 
-目標：第一版 SITL 不依賴 QGC，三台 `gz_x500` 完成 staging 並進入 leader following 後，operator 只透過 `/swarm/change_formation` 切換 `vee` 與 `line_abreast`。Ground station 只能發布 `/swarm/formation_mode`；followers 必須在各自 `vehicle_node` 內根據 `/vehicle_1/status`、formation mode、自己的 fixed slot 計算 setpoint。
+目標：第一版 SITL 不依賴 QGC，三台 `gz_x500` 完成 staging 並進入 leader following 後，operator 只透過 `/swarm/change_formation` 切換 `vee` 與 `line_abreast`。Ground station 只能發布 `/swarm/formation_mode`；followers 必須在各自 `vehicle_node` 內根據 `/MAV1/status`、formation mode、自己的 fixed slot 計算 setpoint。
 
 完整任務卡：
 
@@ -43,7 +43,7 @@ MicroXRCEAgent -> PX4 instance 1 -> PX4 instance 2 -> PX4 instance 3
 照 `ticket09_follower_following_manual_smoke.zh.md` 啟動：
 
 ```text
-vehicle_1 node -> vehicle_2 node -> vehicle_3 node -> ground_station_node
+MAV1 node -> MAV2 node -> MAV3 node -> ground_station_node
 ```
 
 確認 bridge：
@@ -65,14 +65,14 @@ ros2 run px4_swarm_control check_live_px4_gz_bridge --agent-log /tmp/microxrceag
 
 ```bash
 ros2 action list | grep /swarm
-ros2 topic list | grep -E '/swarm/(leader_goal|formation_mode)|/vehicle_[123]/status|/vehicle_[123]/staging_setpoint'
+ros2 topic list | grep -E '/swarm/(leader_goal|formation_mode)|/MAV[123]/status|/MAV[123]/staging_setpoint'
 ```
 
 通過條件：
 
 - actions 包含 `/swarm/takeoff`、`/swarm/move_leader`、`/swarm/change_formation`、`/swarm/land`。
 - topics 包含 `/swarm/formation_mode`。
-- topics 包含 `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status`。
+- topics 包含 `/MAV1/status`、`/MAV2/status`、`/MAV3/status`。
 
 ## 2. TakeoffSwarm 到 staging
 
@@ -86,9 +86,9 @@ ros2 action send_goal /swarm/takeoff px4_swarm_interfaces/action/TakeoffSwarm \
 - result 顯示 `success: true`。
 - message 是 `all vehicles reached staging positions`。
 - 三台都到 staging：
-  - `vehicle_1`: 約 `(0, 0, -5)`
-  - `vehicle_2`: 約 `(-3, 4, -5)`
-  - `vehicle_3`: 約 `(-3, -4, -5)`
+  - `MAV1`: 約 `(0, 0, -5)`
+  - `MAV2`: 約 `(-3, 4, -5)`
+  - `MAV3`: 約 `(-3, -4, -5)`
 
 ## 3. MoveLeader 進入 following
 
@@ -101,22 +101,22 @@ ros2 action send_goal /swarm/move_leader px4_swarm_interfaces/action/MoveLeader 
 
 - result 顯示 `success: true`。
 - message 是 `leader reached target`。
-- `/vehicle_1/status` 接近 `(3, 2, -5)`，`yaw` 接近 `0.0`。
+- `/MAV1/status` 接近 `(3, 2, -5)`，`yaw` 接近 `0.0`。
 
 ## 4. 確認預設 vee
 
 ```bash
-ros2 topic echo --once /vehicle_1/status
-ros2 topic echo --once /vehicle_2/status
-ros2 topic echo --once /vehicle_3/status
+ros2 topic echo --once /MAV1/status
+ros2 topic echo --once /MAV2/status
+ros2 topic echo --once /MAV3/status
 ```
 
 若 leader 約 `(3, 2, -5, yaw=0)`，預設 `vee` 通過條件約為：
 
 ```text
-vehicle_1: x ~= 3, y ~= 2,  z ~= -5
-vehicle_2: x ~= 0, y ~= 6,  z ~= -5
-vehicle_3: x ~= 0, y ~= -2, z ~= -5
+MAV1: x ~= 3, y ~= 2,  z ~= -5
+MAV2: x ~= 0, y ~= 6,  z ~= -5
+MAV3: x ~= 0, y ~= -2, z ~= -5
 ```
 
 Gazebo 中應看到兩台 followers 在 leader 後方左右兩側。
@@ -150,17 +150,17 @@ formation established
 ## 6. 確認 line_abreast 位置
 
 ```bash
-ros2 topic echo --once /vehicle_1/status
-ros2 topic echo --once /vehicle_2/status
-ros2 topic echo --once /vehicle_3/status
+ros2 topic echo --once /MAV1/status
+ros2 topic echo --once /MAV2/status
+ros2 topic echo --once /MAV3/status
 ```
 
 若 leader 約 `(3, 2, -5, yaw=0)`，`line_abreast` 通過條件約為：
 
 ```text
-vehicle_1: x ~= 3, y ~= 2,  z ~= -5
-vehicle_2: x ~= 3, y ~= 6,  z ~= -5
-vehicle_3: x ~= 3, y ~= -2, z ~= -5
+MAV1: x ~= 3, y ~= 2,  z ~= -5
+MAV2: x ~= 3, y ~= 6,  z ~= -5
+MAV3: x ~= 3, y ~= -2, z ~= -5
 ```
 
 允許約 `0.3m` position tolerance 和約 `0.2rad` yaw tolerance。Gazebo 中應看到兩台 followers 移到 leader 左右同一排。
@@ -176,9 +176,9 @@ ros2 topic echo --once /swarm/formation_mode
 通過條件：
 
 - `/swarm/formation_mode` 顯示 `mode: line_abreast`。
-- Ground station 在 formation change 階段只發布 mode，不應把 follower 新位置當成 `/vehicle_2/staging_setpoint` 或 `/vehicle_3/staging_setpoint` 持續發布。
-- `vehicle_2` 應維持 `slot: follower_left`。
-- `vehicle_3` 應維持 `slot: follower_right`。
+- Ground station 在 formation change 階段只發布 mode，不應把 follower 新位置當成 `/MAV2/staging_setpoint` 或 `/MAV3/staging_setpoint` 持續發布。
+- `MAV2` 應維持 `slot: follower_left`。
+- `MAV3` 應維持 `slot: follower_right`。
 - followers 不應飛到 leader 的 absolute goal，而是飛到 leader state 加上自己的 mode/slot offset。
 
 ## 8. ChangeFormation 切回 vee
@@ -195,8 +195,8 @@ ros2 action send_goal /swarm/change_formation px4_swarm_interfaces/action/Change
 - 若 leader 約 `(3, 2, -5, yaw=0)`，followers 回到：
 
 ```text
-vehicle_2: x ~= 0, y ~= 6,  z ~= -5
-vehicle_3: x ~= 0, y ~= -2, z ~= -5
+MAV2: x ~= 0, y ~= 6,  z ~= -5
+MAV3: x ~= 0, y ~= -2, z ~= -5
 ```
 
 ## 9. 附加 yaw 旋轉驗證
@@ -229,7 +229,7 @@ ros2 action send_goal /swarm/land px4_swarm_interfaces/action/LandSwarm \
 - `ChangeFormation` 只接受 `vee` 和 `line_abreast`。
 - `ChangeFormation` 不移動 leader。
 - Ground station 只發布 `/swarm/formation_mode`，不替 followers 持續發布 absolute formation target。
-- Followers 由各自 `vehicle_node` 根據 `/vehicle_1/status`、formation mode、fixed slot 本地計算 setpoint。
-- `vehicle_2` 維持 `follower_left`，`vehicle_3` 維持 `follower_right`。
+- Followers 由各自 `vehicle_node` 根據 `/MAV1/status`、formation mode、fixed slot 本地計算 setpoint。
+- `MAV2` 維持 `follower_left`，`MAV3` 維持 `follower_right`。
 - `ChangeFormation` success 必須等 followers 實際到新 formation tolerance 內才出現。
 - `LandSwarm` 最後讓三台 landed。

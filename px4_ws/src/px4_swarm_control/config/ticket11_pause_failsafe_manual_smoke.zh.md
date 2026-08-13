@@ -45,7 +45,7 @@ MicroXRCEAgent -> PX4 instance 1 -> PX4 instance 2 -> PX4 instance 3
 照 `ticket09_follower_following_manual_smoke.zh.md` 啟動：
 
 ```text
-vehicle_1 node -> vehicle_2 node -> vehicle_3 node -> ground_station_node
+MAV1 node -> MAV2 node -> MAV3 node -> ground_station_node
 ```
 
 確認 bridge：
@@ -106,9 +106,9 @@ ros2 action send_goal /swarm/pause px4_swarm_interfaces/action/PauseSwarm \
 確認 status：
 
 ```bash
-ros2 topic echo --once /vehicle_1/status
-ros2 topic echo --once /vehicle_2/status
-ros2 topic echo --once /vehicle_3/status
+ros2 topic echo --once /MAV1/status
+ros2 topic echo --once /MAV2/status
+ros2 topic echo --once /MAV3/status
 ```
 
 ## 5. Paused 狀態拒絕 MoveLeader
@@ -122,7 +122,7 @@ ros2 action send_goal /swarm/move_leader px4_swarm_interfaces/action/MoveLeader 
 
 - action 應回失敗或 aborted。
 - result message 應包含 paused，例如 `MoveLeader rejected while swarm is paused`。
-- `/vehicle_1/status` 不應開始追 `(6, 2, -5)`。
+- `/MAV1/status` 不應開始追 `(6, 2, -5)`。
 - Gazebo 中三台仍 hold。
 
 ## 6. Paused 狀態拒絕 ChangeFormation

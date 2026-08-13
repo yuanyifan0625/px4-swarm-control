@@ -47,7 +47,7 @@ MicroXRCEAgent -> PX4 instance 1 -> PX4 instance 2 -> PX4 instance 3
 照 `ticket09_follower_following_manual_smoke.zh.md` 啟動：
 
 ```text
-vehicle_1 node -> vehicle_2 node -> vehicle_3 node -> ground_station_node
+MAV1 node -> MAV2 node -> MAV3 node -> ground_station_node
 ```
 
 確認 bridge：
@@ -101,9 +101,9 @@ s=status, p=pause, r=resume, q=quit, h=help
 
 - Console 輸出 `OK: all vehicles reached staging positions`。
 - Gazebo 中三台起飛並到分離 staging。
-- `/vehicle_1/status` 約在 `(0, 0, -5)`。
-- `/vehicle_2/status` 約在 `(-3, 4, -5)`。
-- `/vehicle_3/status` 約在 `(-3, -4, -5)`。
+- `/MAV1/status` 約在 `(0, 0, -5)`。
+- `/MAV2/status` 約在 `(-3, 4, -5)`。
+- `/MAV3/status` 約在 `(-3, -4, -5)`。
 
 ## 4. 使用 console 移動 leader 與旋轉 yaw
 
@@ -116,10 +116,10 @@ s=status, p=pause, r=resume, q=quit, h=help
 
 通過條件：
 
-- `2` 會讀 `/vehicle_1/status`，把目前 leader 位置加上 world-frame `x + 1m`，再送既有 `MoveLeader` absolute goal。
-- `5` 會讀 `/vehicle_1/status`，把目前 leader yaw 加上 `45deg`，再送既有 `MoveLeader` absolute yaw goal。
+- `2` 會讀 `/MAV1/status`，把目前 leader 位置加上 world-frame `x + 1m`，再送既有 `MoveLeader` absolute goal。
+- `5` 會讀 `/MAV1/status`，把目前 leader yaw 加上 `45deg`，再送既有 `MoveLeader` absolute yaw goal。
 - Console 輸出 `OK: leader reached target`。
-- Gazebo 中只有 leader 直接吃 operator 的 MoveLeader 目標；followers 仍透過 `/vehicle_1/status` 和 formation mode 在各自 `vehicle_node` 本地跟隨。
+- Gazebo 中只有 leader 直接吃 operator 的 MoveLeader 目標；followers 仍透過 `/MAV1/status` 和 formation mode 在各自 `vehicle_node` 本地跟隨。
 
 ## 5. 使用 console 切換隊形
 
@@ -135,7 +135,7 @@ s=status, p=pause, r=resume, q=quit, h=help
 - `7` 輸出 `OK: formation established`，followers 移到 `line_abreast`。
 - `6` 輸出 `OK: formation established`，followers 回到 `vee`。
 - Ground station 只發布 `/swarm/formation_mode`。
-- 不應有 console 或 ground station 持續發布 `/vehicle_2/staging_setpoint`、`/vehicle_3/staging_setpoint` 作為 formation movement 目標。
+- 不應有 console 或 ground station 持續發布 `/MAV2/staging_setpoint`、`/MAV3/staging_setpoint` 作為 formation movement 目標。
 
 ## 6. Pause 後確認 move 被拒絕
 
@@ -215,7 +215,7 @@ ros2 run px4_swarm_control operator_console --ros-args \
 - 任一步失敗時 macro 會停止，不會硬跑後續命令。
 - 若全部成功，console 輸出 `OK: demo macro completed`。
 - `home` 會回到 takeoff 完成後讀到的 leader staging 位置。
-- 每個 `settle` 只觀察 `/vehicle_1/status`、`/vehicle_2/status`、`/vehicle_3/status` 和目前 console 記錄的 formation mode，不會發布 follower target。
+- 每個 `settle` 只觀察 `/MAV1/status`、`/MAV2/status`、`/MAV3/status` 和目前 console 記錄的 formation mode，不會發布 follower target。
 - Gazebo 中 followers 應在每個 leader move、yaw change 或 formation change 後穩定一下，才進入下一個 demo step。
 
 確認 `settle` 沒有造成不乾淨資訊流：
@@ -224,11 +224,11 @@ ros2 run px4_swarm_control operator_console --ros-args \
 cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-timeout 3 ros2 topic echo --once /vehicle_2/staging_setpoint || true
-timeout 3 ros2 topic echo --once /vehicle_3/staging_setpoint || true
+timeout 3 ros2 topic echo --once /MAV2/staging_setpoint || true
+timeout 3 ros2 topic echo --once /MAV3/staging_setpoint || true
 ```
 
-通過條件：demo following / formation change 階段不應因 `settle` 產生新的 follower staging setpoint；followers 應只透過各自 `vehicle_node` 根據 `/vehicle_1/status` 和 formation mode 本地計算跟隨 setpoint。
+通過條件：demo following / formation change 階段不應因 `settle` 產生新的 follower staging setpoint；followers 應只透過各自 `vehicle_node` 根據 `/MAV1/status` 和 formation mode 本地計算跟隨 setpoint。
 
 ## 整體通過條件
 

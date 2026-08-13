@@ -30,7 +30,7 @@ def test_package_exposes_initial_contract_names():
 
 def test_namespace_scaffold_uses_role_independent_vehicle_names():
     assert SWARM_NAMESPACE == "/swarm"
-    assert VEHICLE_NAMESPACES == ("/vehicle_1", "/vehicle_2", "/vehicle_3")
+    assert VEHICLE_NAMESPACES == ("/MAV1", "/MAV2", "/MAV3")
 
 
 def test_three_vehicle_manual_debug_docs_name_external_prerequisites_and_nodes():
@@ -39,9 +39,9 @@ def test_three_vehicle_manual_debug_docs_name_external_prerequisites_and_nodes()
 
     assert 'MicroXRCEAgent udp4 -p 8888' in text
     assert 'make px4_sitl' in text
-    assert 'vehicle_1' in text
-    assert 'vehicle_2' in text
-    assert 'vehicle_3' in text
+    assert 'MAV1' in text
+    assert 'MAV2' in text
+    assert 'MAV3' in text
     assert '/fmu/out' in text
 
 
@@ -49,10 +49,10 @@ def test_three_vehicle_config_file_names_fixed_namespace_layout():
     config = Path(__file__).parents[1] / 'config' / 'three_vehicle_nodes.yaml'
     text = config.read_text()
 
-    assert 'vehicle_1' in text
+    assert 'MAV1' in text
     assert 'role: leader' in text
     assert 'slot: leader' in text
-    assert 'vehicle_2' in text
+    assert 'MAV2' in text
     assert 'slot: follower_left' in text
-    assert 'vehicle_3' in text
+    assert 'MAV3' in text
     assert 'slot: follower_right' in text
