@@ -1,7 +1,9 @@
 from glob import glob
+from pathlib import Path
 from setuptools import find_packages, setup
 
 package_name = "px4_swarm_control"
+config_files = [path for path in glob("config/*") if Path(path).is_file()]
 
 setup(
     name=package_name,
@@ -10,7 +12,11 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
         (f"share/{package_name}", ["package.xml"]),
-        (f"share/{package_name}/config", glob("config/*")),
+        (f"share/{package_name}/config", config_files),
+        (
+            f"share/{package_name}/config/px4_speed_profiles",
+            glob("config/px4_speed_profiles/*"),
+        ),
         (f"share/{package_name}/launch", glob("launch/*")),
     ],
     install_requires=["setuptools"],
@@ -25,6 +31,7 @@ setup(
             "check_live_px4_gz_bridge = px4_swarm_control.live_bridge_smoke:main",
             "ground_station_node = px4_swarm_control.ground_station_node:main",
             "operator_console = px4_swarm_control.operator_console:main",
+            "px4_speed_profile = px4_swarm_control.px4_speed_profile:main",
             "vehicle_node = px4_swarm_control.vehicle_node:main",
         ],
     },
