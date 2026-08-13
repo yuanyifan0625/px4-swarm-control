@@ -4,6 +4,7 @@ from setuptools import find_packages, setup
 
 package_name = "px4_swarm_control"
 config_files = [path for path in glob("config/*") if Path(path).is_file()]
+launch_files = [path for path in glob("launch/*") if Path(path).is_file()]
 
 setup(
     name=package_name,
@@ -17,7 +18,7 @@ setup(
             f"share/{package_name}/config/px4_speed_profiles",
             glob("config/px4_speed_profiles/*"),
         ),
-        (f"share/{package_name}/launch", glob("launch/*")),
+        (f"share/{package_name}/launch", launch_files),
     ],
     install_requires=["setuptools"],
     zip_safe=True,

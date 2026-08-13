@@ -56,3 +56,26 @@ def test_three_vehicle_config_file_names_fixed_namespace_layout():
     assert 'slot: follower_left' in text
     assert 'MAV3' in text
     assert 'slot: follower_right' in text
+
+
+def test_full_sitl_smoke_doc_describes_external_runtime_launch_and_console():
+    smoke_doc = (
+        Path(__file__).parents[1]
+        / 'config'
+        / 'ticket12_full_sitl_smoke.zh.md'
+    )
+    text = smoke_doc.read_text()
+
+    assert 'MicroXRCEAgent udp4 -p 8888' in text
+    assert 'PX4_UXRCE_DDS_NS=MAV1' in text
+    assert 'PX4_UXRCE_DDS_NS=MAV2' in text
+    assert 'PX4_UXRCE_DDS_NS=MAV3' in text
+    assert 'ros2 launch px4_swarm_control swarm_nodes.launch.py' in text
+    assert 'px4_speed_profile print-check-commands --profile slow_demo' in text
+    assert 'px4_speed_profile apply --profile slow_demo --yes' in text
+    assert 'operator_console --command 9' in text
+    assert '/MAV1/status' in text
+    assert '/MAV2/status' in text
+    assert '/MAV3/status' in text
+    assert 'vehicle_state: landed' in text
+    assert 'armed: false' in text
