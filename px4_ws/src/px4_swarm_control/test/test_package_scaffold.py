@@ -9,6 +9,15 @@ from px4_swarm_control.package_info import (
 )
 
 
+def read_full_sitl_smoke_doc() -> str:
+    smoke_doc = (
+        Path(__file__).parents[1]
+        / 'config'
+        / 'ticket12_full_sitl_smoke.zh.md'
+    )
+    return smoke_doc.read_text()
+
+
 def test_package_exposes_initial_contract_names():
     assert __version__ == "0.1.0"
     assert EXPECTED_ACTIONS == (
@@ -59,12 +68,7 @@ def test_three_vehicle_config_file_names_fixed_namespace_layout():
 
 
 def test_full_sitl_smoke_doc_describes_external_runtime_launch_and_console():
-    smoke_doc = (
-        Path(__file__).parents[1]
-        / 'config'
-        / 'ticket12_full_sitl_smoke.zh.md'
-    )
-    text = smoke_doc.read_text()
+    text = read_full_sitl_smoke_doc()
 
     assert 'MicroXRCEAgent udp4 -p 8888' in text
     assert 'PX4_UXRCE_DDS_NS=MAV1' in text
@@ -79,3 +83,12 @@ def test_full_sitl_smoke_doc_describes_external_runtime_launch_and_console():
     assert '/MAV3/status' in text
     assert 'vehicle_state: landed' in text
     assert 'armed: false' in text
+
+
+def test_full_sitl_smoke_doc_uses_in_container_commands():
+    text = read_full_sitl_smoke_doc()
+
+    assert 'docker compose exec ros2_jazzy bash -lc' not in text
+    assert '你已經進入 container' in text
+    assert '/home/ncrl/docker_ubuntu24' in text
+    assert 'cd /home/ncrl/docker_ubuntu24/px4_ws' in text
