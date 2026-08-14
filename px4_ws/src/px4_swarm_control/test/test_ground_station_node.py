@@ -110,7 +110,7 @@ def test_default_ground_station_config_uses_small_field_operation_profile():
     assert config.formation_vee_lateral_spacing_m == 0.4
     assert config.formation_vee_trail_spacing_m == 0.6928
     assert config.formation_line_abreast_lateral_spacing_m == 0.8
-    assert config.formation_position_tolerance_m == 0.15
+    assert config.formation_position_tolerance_m == 0.10
 
 
 def test_arm_action_publishes_arm_command_without_staging_or_takeoff():

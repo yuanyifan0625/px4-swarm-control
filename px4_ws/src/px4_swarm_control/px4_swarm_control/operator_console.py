@@ -25,6 +25,7 @@ from px4_swarm_control.operation_profile import FORMATION_POSITION_TOLERANCE_M
 from px4_swarm_control.operation_profile import LINE_ABREAST_LATERAL_SPACING_M
 from px4_swarm_control.operation_profile import MOVE_STEP_X_M
 from px4_swarm_control.operation_profile import MOVE_STEP_Y_M
+from px4_swarm_control.operation_profile import SETTLE_STABLE_DURATION_S
 from px4_swarm_control.operation_profile import TAKEOFF_ALTITUDE_M
 from px4_swarm_control.operation_profile import VEE_LATERAL_SPACING_M
 from px4_swarm_control.operation_profile import VEE_TRAIL_SPACING_M
@@ -62,7 +63,7 @@ class OperatorConsoleConfig:
     move_position_tolerance_m: float = 0.3
     move_yaw_tolerance_rad: float = 0.2
     status_wait_timeout_s: float = 2.0
-    settle_stable_duration_s: float = 1.0
+    settle_stable_duration_s: float = SETTLE_STABLE_DURATION_S
     settle_timeout_sec: float = 30.0
     settle_position_tolerance_m: float = FORMATION_POSITION_TOLERANCE_M
     settle_yaw_tolerance_rad: float = 0.25
@@ -164,7 +165,7 @@ class ConsoleCommandDispatcher:
                 self._config.takeoff_altitude_m,
                 self._config.default_timeout_sec,
             )
-        if command in {'2', '3', '4', '5'}:
+        if command in {'2', '3', '4', '5', 'x', 'y', 'z', 'c'}:
             return self._run_motion_command(command)
         if command == '6':
             return self._run_formation_command('vee')
@@ -193,12 +194,20 @@ class ConsoleCommandDispatcher:
         x, y, z, yaw = leader.x, leader.y, leader.z, leader.yaw
         if command == '2':
             x += self._config.move_step_x_m
+        elif command == 'x':
+            x -= self._config.move_step_x_m
         elif command == '3':
             y += self._config.move_step_y_m
+        elif command == 'y':
+            y -= self._config.move_step_y_m
         elif command == '4':
             z -= self._config.altitude_step_m
+        elif command == 'z':
+            z += self._config.altitude_step_m
         elif command == '5':
             yaw = _normalize_yaw_rad(yaw + self._config.yaw_step_rad)
+        elif command == 'c':
+            yaw = _normalize_yaw_rad(yaw - self._config.yaw_step_rad)
 
         # Console 只把 operator 的相對 jog 轉成既有 leader absolute goal，保護 follower 不被直接指定目標。
         return self._gateway.move_leader(
@@ -216,6 +225,12 @@ class ConsoleCommandDispatcher:
             return ConsoleActionResult(
                 False,
                 'formation command blocked while swarm is paused',
+            )
+        preflight = self._move_current_leader_pose_for_formation()
+        if not preflight.success:
+            return ConsoleActionResult(
+                False,
+                f'formation preflight move failed: {preflight.message}',
             )
         result = self._gateway.change_formation(
             formation_mode,
@@ -266,6 +281,20 @@ class ConsoleCommandDispatcher:
             status.y,
             status.z,
             status.yaw,
+            self._config.move_position_tolerance_m,
+            self._config.move_yaw_tolerance_rad,
+            self._config.default_timeout_sec,
+        )
+
+    def _move_current_leader_pose_for_formation(self) -> ConsoleActionResult:
+        leader = self._gateway.get_leader_status()
+        if leader is None:
+            return ConsoleActionResult(False, 'leader status unavailable')
+        return self._gateway.move_leader(
+            leader.x,
+            leader.y,
+            leader.z,
+            leader.yaw,
             self._config.move_position_tolerance_m,
             self._config.move_yaw_tolerance_rad,
             self._config.default_timeout_sec,
@@ -454,7 +483,7 @@ class OperatorConsoleNode(Node):
         self.declare_parameter('move_position_tolerance_m', 0.3)
         self.declare_parameter('move_yaw_tolerance_rad', 0.2)
         self.declare_parameter('status_wait_timeout_s', 2.0)
-        self.declare_parameter('settle_stable_duration_s', 1.0)
+        self.declare_parameter('settle_stable_duration_s', SETTLE_STABLE_DURATION_S)
         self.declare_parameter('settle_timeout_sec', 30.0)
         self.declare_parameter(
             'settle_position_tolerance_m',
@@ -578,9 +607,13 @@ def _help_text() -> str:
         '  0: ArmSwarm without takeoff\n'
         '  1: TakeoffSwarm\n'
         '  2: move leader world x + step\n'
+        '  x: move leader world x - step\n'
         '  3: move leader world y + step\n'
+        '  y: move leader world y - step\n'
         '  4: move leader up by altitude step (NED z -= step)\n'
+        '  z: move leader down by altitude step (NED z += step)\n'
         '  5: rotate leader yaw + step\n'
+        '  c: rotate leader yaw - step\n'
         '  6: ChangeFormation vee\n'
         '  7: ChangeFormation line_abreast\n'
         '  8: LandSwarm\n'

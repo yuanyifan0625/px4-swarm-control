@@ -5,9 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from launch.actions import DeclareLaunchArgument
 from launch import LaunchDescription
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES
+from px4_swarm_control.operation_profile import FORMATION_POSITION_TOLERANCE_M
 
 
 def _config_path() -> Path:
@@ -39,10 +42,16 @@ def generate_launch_description() -> LaunchDescription:
     config_path = _config_path()
     vehicle_parameters = _load_vehicle_parameters(config_path)
     ground_station_parameters = _load_ground_station_parameters(config_path)
-    nodes = []
+    launch_entities = [
+        DeclareLaunchArgument(
+            'formation_position_tolerance_m',
+            default_value=f'{FORMATION_POSITION_TOLERANCE_M:.2f}',
+            description='Ground-station formation completion position tolerance.',
+        ),
+    ]
     for vehicle in FIRST_VERSION_VEHICLES:
         # 由同一份 MAV YAML 取 role/slot/target，保護 launch 時不把三台飛機接錯。
-        nodes.append(
+        launch_entities.append(
             Node(
                 package='px4_swarm_control',
                 executable='vehicle_node',
@@ -52,12 +61,19 @@ def generate_launch_description() -> LaunchDescription:
                 output='screen',
             ),
         )
-    nodes.append(
+    launch_entities.append(
         Node(
             package='px4_swarm_control',
             executable='ground_station_node',
-            parameters=[ground_station_parameters],
+            parameters=[
+                ground_station_parameters,
+                {
+                    'formation_position_tolerance_m': LaunchConfiguration(
+                        'formation_position_tolerance_m',
+                    ),
+                },
+            ],
             output='screen',
         ),
     )
-    return LaunchDescription(nodes)
+    return LaunchDescription(launch_entities)

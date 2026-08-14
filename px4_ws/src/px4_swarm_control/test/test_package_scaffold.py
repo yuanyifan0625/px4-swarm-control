@@ -85,8 +85,16 @@ def test_final_sitl_smoke_doc_describes_external_runtime_launch_and_console():
     assert 'PX4_UXRCE_DDS_NS=MAV2' in text
     assert 'PX4_UXRCE_DDS_NS=MAV3' in text
     assert 'ros2 launch px4_swarm_control swarm_nodes.launch.py' in text
+    assert 'formation_position_tolerance_m:=0.10' in text
     assert 'ros2 run px4_swarm_control operator_console' in text
+    assert 'ros2 launch px4_swarm_control operator_console.launch.py' in text
+    assert 'settle_position_tolerance_m:=0.10' in text
+    assert 'settle_stable_duration_s:=1.5' in text
     assert '9' in text
+    assert 'x' in text
+    assert 'y' in text
+    assert 'z' in text
+    assert 'c' in text
     assert '/swarm/arm' in text
     assert '/MAV1/status' in text
     assert '/MAV2/status' in text
@@ -111,7 +119,13 @@ def test_final_real_vehicle_doc_names_distributed_launches_and_mav_contract():
     assert 'real_mav2_vehicle.launch.py' in text
     assert 'real_mav3_vehicle.launch.py' in text
     assert 'real_ground_station.launch.py' in text
+    assert 'formation_position_tolerance_m:=0.10' in text
     assert 'ros2 run px4_swarm_control operator_console' in text
+    assert 'ros2 launch px4_swarm_control operator_console.launch.py' in text
+    assert 'settle_position_tolerance_m:=0.10' in text
+    assert 'settle_stable_duration_s:=1.5' in text
+    assert '0.12' in text
+    assert '0.15' in text
     assert '/MAV1/fmu/out/vehicle_local_position_v1' in text
     assert '/MAV2/fmu/out/vehicle_status_v4' in text
     assert '/MAV3/fmu/out/vehicle_command_ack_v1' in text

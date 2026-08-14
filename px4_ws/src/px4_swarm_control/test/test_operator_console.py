@@ -144,7 +144,9 @@ def test_numeric_commands_call_existing_swarm_actions_with_configured_defaults()
     assert gateway.calls == [
         ('takeoff', 6.0, 70.0),
         ('arm', 70.0),
+        ('move_leader', 10.0, 20.0, -5.0, 0.25, 0.3, 0.1, 70.0),
         ('change_formation', 'vee', 70.0),
+        ('move_leader', 10.0, 20.0, -5.0, 0.25, 0.3, 0.1, 70.0),
         ('change_formation', 'line_abreast', 70.0),
         ('land', 70.0),
     ]
@@ -201,6 +203,32 @@ def test_relative_leader_jog_commands_convert_from_current_status_to_absolute_go
     assert isclose(move_calls[3][4], pi / 4.0)
 
 
+def test_negative_world_frame_jog_commands_convert_to_absolute_goals():
+    config = OperatorConsoleConfig(
+        move_step_x_m=1.0,
+        move_step_y_m=1.0,
+        altitude_step_m=1.0,
+        yaw_step_rad=pi / 4.0,
+        move_position_tolerance_m=0.3,
+        move_yaw_tolerance_rad=0.2,
+        default_timeout_sec=60.0,
+    )
+    gateway = FakeGateway(leader_status=leader_status(x=1.0, y=2.0, z=-5.0, yaw=0.0))
+    dispatcher = ConsoleCommandDispatcher(config, gateway)
+
+    dispatcher.dispatch('x')
+    dispatcher.dispatch('y')
+    dispatcher.dispatch('z')
+    dispatcher.dispatch('c')
+
+    move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
+    assert move_calls[0][1:5] == (0.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:5] == (1.0, 1.0, -5.0, 0.0)
+    assert move_calls[2][1:5] == (1.0, 2.0, -4.0, 0.0)
+    assert move_calls[3][1:4] == (1.0, 2.0, -5.0)
+    assert isclose(move_calls[3][4], -pi / 4.0)
+
+
 def test_operator_console_defaults_use_small_field_operation_profile():
     config = OperatorConsoleConfig()
 
@@ -208,7 +236,8 @@ def test_operator_console_defaults_use_small_field_operation_profile():
     assert config.move_step_x_m == 1.0
     assert config.move_step_y_m == 1.0
     assert config.yaw_step_rad == pi / 6.0
-    assert config.settle_position_tolerance_m == 0.15
+    assert config.settle_stable_duration_s == 1.5
+    assert config.settle_position_tolerance_m == 0.10
     assert config.settle_vee_lateral_spacing_m == 0.4
     assert config.settle_vee_trail_spacing_m == 0.6928
     assert config.settle_line_abreast_lateral_spacing_m == 0.8
@@ -259,11 +288,42 @@ def test_demo_macro_runs_settle_steps_and_tracks_successful_formation_mode():
     assert result.success is True
     assert gateway.calls == [
         ('takeoff', 1.5, 60.0),
+        ('move_leader', 0.0, 0.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('change_formation', 'line_abreast', 60.0),
-        ('settle', 'line_abreast', 1.0, 30.0, 0.15, 0.25),
+        ('settle', 'line_abreast', 1.5, 30.0, 0.10, 0.25),
+        ('move_leader', 0.0, 0.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('change_formation', 'vee', 60.0),
-        ('settle', 'vee', 1.0, 30.0, 0.15, 0.25),
+        ('settle', 'vee', 1.5, 30.0, 0.10, 0.25),
         ('land', 60.0),
+    ]
+
+
+def test_formation_command_runs_noop_leader_move_before_change_formation():
+    gateway = FakeGateway(leader_status=leader_status(x=1.0, y=2.0, z=-1.5, yaw=0.5))
+    dispatcher = ConsoleCommandDispatcher(OperatorConsoleConfig(), gateway)
+
+    result = dispatcher.dispatch('6')
+
+    assert result.success is True
+    assert gateway.calls == [
+        ('move_leader', 1.0, 2.0, -1.5, 0.5, 0.3, 0.2, 60.0),
+        ('change_formation', 'vee', 60.0),
+    ]
+
+
+def test_formation_command_stops_when_noop_leader_move_fails():
+    gateway = FakeGateway(
+        leader_status=leader_status(x=1.0, y=2.0, z=-1.5, yaw=0.5),
+        action_results={'move_leader': ConsoleActionResult(False, 'move timeout')},
+    )
+    dispatcher = ConsoleCommandDispatcher(OperatorConsoleConfig(), gateway)
+
+    result = dispatcher.dispatch('7')
+
+    assert result.success is False
+    assert result.message == 'formation preflight move failed: move timeout'
+    assert gateway.calls == [
+        ('move_leader', 1.0, 2.0, -1.5, 0.5, 0.3, 0.2, 60.0),
     ]
 
 
@@ -310,9 +370,9 @@ def test_demo_macro_home_yaw_rotates_current_leader_pose_to_home_yaw_before_home
         ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('move_leader', 2.0, 2.0, -5.0, pi / 6.0, 0.3, 0.2, 60.0),
         ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
-        ('settle', 'vee', 1.0, 30.0, 0.15, 0.25),
+        ('settle', 'vee', 1.5, 30.0, 0.10, 0.25),
         ('move_leader', 1.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
-        ('settle', 'vee', 1.0, 30.0, 0.15, 0.25),
+        ('settle', 'vee', 1.5, 30.0, 0.10, 0.25),
         ('land', 60.0),
     ]
 
@@ -333,7 +393,7 @@ def test_demo_macro_stops_when_settle_times_out():
     assert 'formation settle timed out' in result.message
     assert gateway.calls == [
         ('takeoff', 1.5, 60.0),
-        ('settle', 'vee', 1.0, 30.0, 0.15, 0.25),
+        ('settle', 'vee', 1.5, 30.0, 0.10, 0.25),
     ]
 
 
@@ -363,6 +423,19 @@ def test_unknown_command_returns_helpful_failure_without_calling_actions():
     assert result.success is False
     assert 'unknown command' in result.message
     assert gateway.calls == []
+
+
+def test_help_text_lists_negative_world_frame_jog_commands():
+    gateway = FakeGateway(leader_status=leader_status())
+    dispatcher = ConsoleCommandDispatcher(OperatorConsoleConfig(), gateway)
+
+    result = dispatcher.dispatch('h')
+
+    assert result.success is True
+    assert 'x: move leader world x - step' in result.message
+    assert 'y: move leader world y - step' in result.message
+    assert 'z: move leader down by altitude step' in result.message
+    assert 'c: rotate leader yaw - step' in result.message
 
 
 def test_formation_settle_ready_uses_leader_state_and_fixed_follower_slots():

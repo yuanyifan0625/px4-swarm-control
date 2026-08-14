@@ -1,6 +1,8 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -34,9 +36,36 @@ def plain_node_parameters(node):
 
 def plain_launch_value(value):
     if isinstance(value, tuple):
+        if len(value) == 1 and isinstance(value[0], LaunchConfiguration):
+            return launch_configuration_name(value[0])
+        if len(value) == 1 and isinstance(value[0], list):
+            return value[0]
+        if all(isinstance(item, list) for item in value):
+            return [
+                ''.join(substitution.text for substitution in item)
+                .strip()
+                .removesuffix('...')
+                .strip()
+                .strip("'")
+                for item in value
+            ]
         text = ''.join(substitution.text for substitution in value).strip()
         return text.removesuffix('...').strip()
     return value
+
+
+def launch_configuration_name(value):
+    return ''.join(
+        substitution.text
+        for substitution in value.variable_name
+    )
+
+
+def launch_argument_names(launch_description):
+    return [
+        entity.name for entity in launch_description.entities
+        if isinstance(entity, DeclareLaunchArgument)
+    ]
 
 
 def test_swarm_launch_starts_only_first_version_swarm_nodes():
@@ -133,3 +162,59 @@ def test_real_ground_station_launch_starts_only_ground_station_node():
     ]
     assert private_node_field(nodes[0], 'node_namespace') is None
     assert 'formation_line_abreast_lateral_spacing_m' in plain_node_parameters(nodes[0])
+
+
+def test_swarm_and_real_ground_station_launches_expose_formation_tolerance_override():
+    for file_name in ('swarm_nodes.launch.py', 'real_ground_station.launch.py'):
+        module = load_launch_module(file_name)
+        launch_description = module.generate_launch_description()
+        nodes = [
+            entity for entity in launch_description.entities
+            if isinstance(entity, Node)
+            and entity.node_executable == 'ground_station_node'
+        ]
+
+        assert 'formation_position_tolerance_m' in launch_argument_names(
+            launch_description,
+        )
+        assert (
+            plain_node_parameters(nodes[0])['formation_position_tolerance_m']
+            == 'formation_position_tolerance_m'
+        )
+
+
+def test_operator_console_launch_starts_only_console_with_settle_overrides():
+    module = load_launch_module('operator_console.launch.py')
+
+    launch_description = module.generate_launch_description()
+    nodes = [
+        entity for entity in launch_description.entities
+        if isinstance(entity, Node)
+    ]
+
+    assert [(node.node_package, node.node_executable) for node in nodes] == [
+        ('px4_swarm_control', 'operator_console'),
+    ]
+    assert set(launch_argument_names(launch_description)) >= {
+        'settle_position_tolerance_m',
+        'settle_stable_duration_s',
+    }
+    parameters = plain_node_parameters(nodes[0])
+    assert parameters['demo_commands'] == [
+        '1',
+        '2',
+        'settle',
+        '5',
+        'settle',
+        '7',
+        'settle',
+        '6',
+        'settle',
+        'home_yaw',
+        'settle',
+        'home',
+        'settle',
+        '8',
+    ]
+    assert parameters['settle_position_tolerance_m'] == 'settle_position_tolerance_m'
+    assert parameters['settle_stable_duration_s'] == 'settle_stable_duration_s'

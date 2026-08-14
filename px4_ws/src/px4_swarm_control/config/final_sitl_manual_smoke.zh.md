@@ -6,10 +6,13 @@
 
 - command `1`：takeoff/staging 高度 `1.5 m`
 - command `2` / `3`：leader x/y 單軸移動 `1.0 m`
+- command `x` / `y`：leader x/y 單軸反方向移動 `1.0 m`
 - command `5`：leader yaw `30 deg`
+- command `c`：leader yaw `-30 deg`
 - `vee`：邊長 `0.8 m` 正三角形，`vee_lateral=0.4`、`vee_trail=0.6928`
 - `line_abreast`：leader 到左右 follower 各 `0.8 m`
-- formation/settle 完成 tolerance：`0.15 m`
+- formation/settle 完成 tolerance：預設 `0.10 m`，不穩時改 `0.12 m`，最後 fallback `0.15 m`
+- settle stable duration：`1.5 s`
 
 調整位置：
 
@@ -101,7 +104,13 @@ source install/setup.bash
 ros2 launch px4_swarm_control swarm_nodes.launch.py
 ```
 
-驗收條件：launch 只啟動 `/MAV1`、`/MAV2`、`/MAV3` 的 `vehicle_node` 和 `/swarm` 的 `ground_station_node`。調整：若一開始 telemetry stale，先停 launch，回第 4 步確認 bridge。
+明確測 `0.10 m` 時：
+
+```bash
+ros2 launch px4_swarm_control swarm_nodes.launch.py formation_position_tolerance_m:=0.10
+```
+
+驗收條件：launch 只啟動 `/MAV1`、`/MAV2`、`/MAV3` 的 `vehicle_node` 和 `/swarm` 的 `ground_station_node`。調整：若 `0.10 m` 太嚴格，可用 `ros2 launch px4_swarm_control swarm_nodes.launch.py formation_position_tolerance_m:=0.12`，最後 fallback `formation_position_tolerance_m:=0.15`；若一開始 telemetry stale，先停 launch，回第 4 步確認 bridge。
 
 ## 6. 檢查 swarm topics/actions
 
@@ -130,28 +139,25 @@ source install/setup.bash
 ros2 run px4_swarm_control operator_console
 ```
 
-建議依序輸入：
+若要用 launch 調整 settle：
+
+```bash
+ros2 launch px4_swarm_control operator_console.launch.py settle_position_tolerance_m:=0.10 settle_stable_duration_s:=1.5
+```
+
+直接隊形切換 smoke，建議依序輸入：
 
 ```text
 s
 0
 1
 settle
-2
-settle
-3
-settle
-4
-settle
-5
+6
 settle
 7
 settle
 6
 settle
-p
-2
-r
 8
 ```
 
@@ -159,11 +165,36 @@ r
 
 - `0` arm-only 經 `/swarm/arm` 完成；若 PX4 preflight auto-disarm，屬正常現象。
 - `1` 起飛到約 `1.5 m` 並完成 staging。
-- `2/3/4/5` 分別完成 leader 小步移動或 yaw。
-- `7` 形成 `line_abreast`，`6` 回到 `vee`。
-- pause 時 `2` 被拒絕，resume 後 `8` land 成功。
+- `1 -> 6` 不需要先手動 jog；`vee` 在 `0.10 m` tolerance 和 `1.5 s` stable duration 後 settle。
+- `7` 形成 `line_abreast`，`6` 回到 `vee`，每次都能 settle。
+- `8` land 成功。
 
-調整：步距與 yaw 改 `operator_console.yaml`；隊形距離和 ground-station formation tolerance 改 `three_vehicle_nodes.yaml`；console settle tolerance 改 `operator_console.yaml`。
+world-frame jog smoke 可另外輸入：
+
+```text
+1
+2
+x
+settle
+3
+y
+settle
+4
+z
+settle
+5
+c
+settle
+7
+settle
+6
+settle
+8
+```
+
+驗收條件：`2/x/3/y/4/z/5/c` 分別完成 leader world-frame 正反向小步移動、升降或 yaw。
+
+調整：步距與 yaw 改 `operator_console.yaml`；隊形距離和 ground-station formation tolerance 改 `three_vehicle_nodes.yaml`；console settle tolerance 和 stable duration 改 `operator_console.yaml`，或用 `operator_console.launch.py` 的 `settle_position_tolerance_m:=0.12` / `0.15` fallback。
 
 ## 8. 完整 demo macro
 

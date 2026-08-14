@@ -5,8 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from launch.actions import DeclareLaunchArgument
 from launch import LaunchDescription
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from px4_swarm_control.operation_profile import FORMATION_POSITION_TOLERANCE_M
 
 
 def _config_path() -> Path:
@@ -19,10 +22,22 @@ def generate_launch_description() -> LaunchDescription:
     parameters = data['ground_station_node']['ros__parameters']
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                'formation_position_tolerance_m',
+                default_value=f'{FORMATION_POSITION_TOLERANCE_M:.2f}',
+                description='Ground-station formation completion position tolerance.',
+            ),
             Node(
                 package='px4_swarm_control',
                 executable='ground_station_node',
-                parameters=[parameters],
+                parameters=[
+                    parameters,
+                    {
+                        'formation_position_tolerance_m': LaunchConfiguration(
+                            'formation_position_tolerance_m',
+                        ),
+                    },
+                ],
                 output='screen',
             ),
         ],

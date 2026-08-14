@@ -33,7 +33,8 @@ Pi-MAV3
 - `/MAV1`、`/MAV2`、`/MAV3` 是唯一支援 namespace；不支援 `/vehicle_1`、`/vehicle_2`、`/vehicle_3`。
 - `px4_msgs` 必須和實際 PX4 bridge topic suffix 相容。
 - 正式操作只在地面站跑一個 active `operator_console`。
-- 小場地隊形完成 tolerance 預設 `0.15 m`；實機若無法穩定收斂，先調 `three_vehicle_nodes.yaml` 的 `formation_position_tolerance_m` 和 `operator_console.yaml` 的 `settle_position_tolerance_m`。
+- 小場地隊形完成 tolerance 預設 `0.10 m`；實機若無法穩定收斂，先改 `0.12 m`，最後 fallback `0.15 m`。
+- 可用 launch-time override 調 `formation_position_tolerance_m`、`settle_position_tolerance_m`、`settle_stable_duration_s`，不需要改 code。
 
 調整：`ROS_DOMAIN_ID` 要在每台機器設同一值，例如 `export ROS_DOMAIN_ID=13`。
 
@@ -119,7 +120,13 @@ source install/setup.bash
 ros2 launch px4_swarm_control real_ground_station.launch.py
 ```
 
-驗收條件：只啟動 `/swarm/ground_station_node`。調整：若找不到三台 status，先檢查第 3 步和 DDS discovery。
+明確測 `0.10 m` 時：
+
+```bash
+ros2 launch px4_swarm_control real_ground_station.launch.py formation_position_tolerance_m:=0.10
+```
+
+驗收條件：只啟動 `/swarm/ground_station_node`。調整：若 `0.10 m` 太嚴格，可用 `ros2 launch px4_swarm_control real_ground_station.launch.py formation_position_tolerance_m:=0.12`，最後 fallback `formation_position_tolerance_m:=0.15`；若找不到三台 status，先檢查第 3 步和 DDS discovery。
 
 ## 5. 檢查 swarm graph
 
@@ -145,21 +152,29 @@ source install/setup.bash
 ros2 run px4_swarm_control operator_console
 ```
 
-驗收條件：出現 `swarm>` prompt。調整：正式操作只保留一個 console；不要多台機器同時下 command。
+需要調整 settle 時：
+
+```bash
+ros2 launch px4_swarm_control operator_console.launch.py settle_position_tolerance_m:=0.10 settle_stable_duration_s:=1.5
+```
+
+驗收條件：出現 `swarm>` prompt。調整：正式操作只保留一個 console；`0.10 m` 太嚴格時改 `settle_position_tolerance_m:=0.12`，最後 fallback `settle_position_tolerance_m:=0.15`；不要多台機器同時下 command。
 
 ## 7. 實機 command 語意
 
 - `0`：arm-only，不起飛，不切 Offboard。
 - `1`：takeoff 到 `1.5 m`，三台進入小場地 staging。
-- `2` / `3`：leader x/y 各移動 `1.0 m`。
+- `2` / `x`：leader world x 正/反方向各移動 `1.0 m`。
+- `3` / `y`：leader world y 正/反方向各移動 `1.0 m`。
 - `4`：leader 上升一個 altitude step。
-- `5`：leader yaw `30 deg`。
+- `z`：leader 下降一個 altitude step。
+- `5` / `c`：leader yaw `+30 deg` / `-30 deg`。
 - `6`：切換 `vee`，三台形成邊長 `0.8 m` 正三角形。
 - `7`：切換 `line_abreast`，leader 到左右 follower 各 `0.8 m`。
 - `8`：全隊 land。
 - `9`：完整 demo macro。
 
-驗收條件：所有 movement/formation command 都只經 `/swarm` action，followers 由各自 vehicle node 追隊形。調整：高度、步距、yaw、console settle tolerance 改 `operator_console.yaml`；隊形幾何和 ground-station formation tolerance 改 `three_vehicle_nodes.yaml`。
+驗收條件：所有 movement/formation command 都只經 `/swarm` action，followers 由各自 vehicle node 追隊形。調整：高度、步距、yaw、console settle tolerance/stable duration 改 `operator_console.yaml` 或 `operator_console.launch.py`；隊形幾何和 ground-station formation tolerance 改 `three_vehicle_nodes.yaml` 或 ground-station launch override。
 
 ## 8. 實機 smoke test checklist
 
