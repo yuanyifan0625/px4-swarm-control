@@ -6,6 +6,7 @@ from math import nan
 from typing import Any, Callable, Optional
 
 from px4_msgs.msg import (
+    FailsafeFlags,
     OffboardControlMode,
     TrajectorySetpoint,
     VehicleCommand,
@@ -15,6 +16,7 @@ from px4_msgs.msg import (
     VehicleStatus as Px4VehicleStatus,
 )
 from px4_swarm_control.bridge_config import PX4_V118_OUT_TOPIC_SUFFIXES
+from px4_swarm_control.bridge_config import PX4_V118_FAILSAFE_FLAGS_TOPIC_SUFFIX
 from px4_swarm_control.bridge_config import PX4_V118_LAND_DETECTED_TOPIC_SUFFIX
 from px4_swarm_control.models import (
     CommandStatus,
@@ -24,6 +26,12 @@ from px4_swarm_control.models import (
     VehicleState,
 )
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+
+PX4_CUSTOM_MODE_ENABLED = 1.0
+PX4_CUSTOM_MAIN_MODE_AUTO = 4.0
+PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6.0
+PX4_CUSTOM_SUB_MODE_AUTO_LOITER = 3.0
 
 
 class Px4VehicleInterface:
@@ -50,6 +58,7 @@ class Px4VehicleInterface:
         self._latest_local_position: Optional[VehicleLocalPosition] = None
         self._latest_vehicle_status: Optional[Px4VehicleStatus] = None
         self._latest_land_detected: Optional[VehicleLandDetected] = None
+        self._latest_failsafe_flags: Optional[FailsafeFlags] = None
 
         qos_profile = _px4_qos_profile()
         self.offboard_control_mode_publisher = node.create_publisher(
@@ -93,6 +102,12 @@ class Px4VehicleInterface:
             # landed telemetry 由 PX4 commander 判定，保護 ROS 2 不用猜測接地狀態。
             self._topic(PX4_V118_LAND_DETECTED_TOPIC_SUFFIX),
             self.handle_vehicle_land_detected,
+            qos_profile,
+        )
+        self.failsafe_flags_subscription = node.create_subscription(
+            FailsafeFlags,
+            self._topic(PX4_V118_FAILSAFE_FLAGS_TOPIC_SUFFIX),
+            self.handle_failsafe_flags,
             qos_profile,
         )
 
@@ -158,8 +173,17 @@ class Px4VehicleInterface:
         # Offboard mode 透過標準 PX4 mode command 切換，避免 vehicle node 繞過 commander。
         self._publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE,
-            param1=1.0,
-            param2=6.0,
+            param1=PX4_CUSTOM_MODE_ENABLED,
+            param2=PX4_CUSTOM_MAIN_MODE_OFFBOARD,
+        )
+
+    def set_ground_safe_mode(self) -> None:
+        # AUTO_LOITER 解除 Offboard signal requirement，保護 landed 後的下一輪 arm-only。
+        self._publish_vehicle_command(
+            VehicleCommand.VEHICLE_CMD_DO_SET_MODE,
+            param1=PX4_CUSTOM_MODE_ENABLED,
+            param2=PX4_CUSTOM_MAIN_MODE_AUTO,
+            param3=PX4_CUSTOM_SUB_MODE_AUTO_LOITER,
         )
 
     def handle_vehicle_local_position(self, msg: VehicleLocalPosition) -> None:
@@ -176,6 +200,9 @@ class Px4VehicleInterface:
 
     def handle_vehicle_land_detected(self, msg: VehicleLandDetected) -> None:
         self._latest_land_detected = msg
+
+    def handle_failsafe_flags(self, msg: FailsafeFlags) -> None:
+        self._latest_failsafe_flags = msg
 
     def vehicle_state(self) -> Optional[VehicleState]:
         if self._latest_local_position is None or self._latest_vehicle_status is None:
@@ -199,6 +226,11 @@ class Px4VehicleInterface:
             armed=vehicle_status.arming_state == Px4VehicleStatus.ARMING_STATE_ARMED,
             navigation_state=_navigation_state_name(vehicle_status.nav_state),
             offboard_available=vehicle_status.accepts_offboard_setpoints,
+            pre_flight_checks_pass=vehicle_status.pre_flight_checks_pass,
+            offboard_control_signal_lost=(
+                self._latest_failsafe_flags is not None
+                and self._latest_failsafe_flags.offboard_control_signal_lost
+            ),
             telemetry_age_s=self._telemetry_age_s(),
             vehicle_level_state=vehicle_level_state,
             landed=landed,
@@ -272,6 +304,8 @@ def _px4_qos_profile() -> QoSProfile:
 def _navigation_state_name(nav_state: int) -> str:
     if nav_state == Px4VehicleStatus.NAVIGATION_STATE_OFFBOARD:
         return 'offboard'
+    if nav_state == Px4VehicleStatus.NAVIGATION_STATE_AUTO_LOITER:
+        return 'auto_loiter'
     if nav_state == Px4VehicleStatus.NAVIGATION_STATE_AUTO_TAKEOFF:
         return 'auto_takeoff'
     if nav_state == Px4VehicleStatus.NAVIGATION_STATE_AUTO_LAND:

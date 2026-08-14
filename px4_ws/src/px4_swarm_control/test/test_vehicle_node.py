@@ -49,6 +49,7 @@ class FakePx4Interface:
         self.setpoints = []
         self.safe_hover_calls = 0
         self.offboard_mode_calls = 0
+        self.ground_safe_mode_calls = 0
         self.arm_calls = 0
         self.takeoff_altitudes = []
         self.land_calls = 0
@@ -65,6 +66,9 @@ class FakePx4Interface:
 
     def set_offboard_mode(self):
         self.offboard_mode_calls += 1
+
+    def set_ground_safe_mode(self):
+        self.ground_safe_mode_calls += 1
 
     def arm(self):
         self.arm_calls += 1
@@ -494,6 +498,7 @@ def test_arm_mission_command_only_arms_without_takeoff_or_staging_flow():
     assert px4_interface.arm_calls == 1
     assert px4_interface.takeoff_altitudes == []
     assert px4_interface.offboard_mode_calls == 0
+    assert px4_interface.ground_safe_mode_calls == 0
     assert px4_interface.setpoints == []
     assert core.vehicle_level_state is VehicleLevelState.ARMING
     assert core._takeoff_to_staging_active is False
@@ -805,6 +810,59 @@ def test_landing_control_tick_does_not_republish_staging_setpoint_or_leave_landi
     assert core.vehicle_level_state is VehicleLevelState.LANDING
 
 
+def test_landed_offboard_telemetry_runs_land_complete_recovery_once_without_control_outputs():
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            z=-0.01,
+            armed=False,
+            navigation_state='offboard',
+            landed=True,
+            vehicle_level_state=VehicleLevelState.LANDING,
+            pre_flight_checks_pass=False,
+            offboard_control_signal_lost=True,
+        ),
+    )
+    core = make_core(px4_interface=px4_interface)
+    mission = MissionCommand()
+    mission.command = MissionCommand.LAND
+    core.handle_mission_command(mission)
+
+    core.control_tick()
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.LANDED
+    assert px4_interface.ground_safe_mode_calls == 1
+    assert px4_interface.heartbeats == 0
+    assert px4_interface.setpoints == []
+    assert px4_interface.takeoff_altitudes == []
+
+
+def test_landed_non_offboard_telemetry_does_not_run_land_complete_recovery():
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            z=-0.01,
+            armed=False,
+            navigation_state='auto_loiter',
+            landed=True,
+            vehicle_level_state=VehicleLevelState.LANDING,
+            pre_flight_checks_pass=True,
+            offboard_control_signal_lost=False,
+        ),
+    )
+    core = make_core(px4_interface=px4_interface)
+    mission = MissionCommand()
+    mission.command = MissionCommand.LAND
+    core.handle_mission_command(mission)
+
+    core.control_tick()
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.LANDED
+    assert px4_interface.ground_safe_mode_calls == 0
+    assert px4_interface.heartbeats == 0
+    assert px4_interface.setpoints == []
+
+
 def test_landed_px4_state_is_reported_as_landed_vehicle_status():
     state = vehicle_state(
         z=-0.01,
@@ -823,6 +881,28 @@ def test_landed_px4_state_is_reported_as_landed_vehicle_status():
 
     assert core.vehicle_level_state is VehicleLevelState.LANDED
     assert status_publisher.messages[-1].vehicle_state == 'landed'
+
+
+def test_publish_status_exposes_arm_eligibility_health_fields():
+    state = vehicle_state(
+        z=-0.01,
+        armed=False,
+        navigation_state='offboard',
+        landed=True,
+        pre_flight_checks_pass=False,
+        offboard_control_signal_lost=True,
+    )
+    status_publisher = FakePublisher()
+    core = make_core(
+        px4_interface=FakePx4Interface(state=state),
+        status_publisher=status_publisher,
+    )
+
+    core.publish_status()
+
+    status = status_publisher.messages[-1]
+    assert status.pre_flight_checks_pass is False
+    assert status.offboard_control_signal_lost is True
 
 
 def test_airborne_px4_telemetry_clears_stale_internal_landed_status():
@@ -969,6 +1049,8 @@ def vehicle_state(
     armed=True,
     navigation_state='offboard',
     offboard_available=False,
+    pre_flight_checks_pass=True,
+    offboard_control_signal_lost=False,
     landed=False,
     vehicle_level_state=VehicleLevelState.HOLDING,
 ):
@@ -980,6 +1062,8 @@ def vehicle_state(
         armed=armed,
         navigation_state=navigation_state,
         offboard_available=offboard_available,
+        pre_flight_checks_pass=pre_flight_checks_pass,
+        offboard_control_signal_lost=offboard_control_signal_lost,
         telemetry_age_s=0.1,
         vehicle_level_state=vehicle_level_state,
         landed=landed,

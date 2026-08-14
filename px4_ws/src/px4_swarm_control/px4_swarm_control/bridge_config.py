@@ -14,6 +14,7 @@ PX4_V118_OUT_TOPIC_SUFFIXES = (
     '/fmu/out/vehicle_command_ack_v1',
 )
 PX4_V118_LAND_DETECTED_TOPIC_SUFFIX = '/fmu/out/vehicle_land_detected'
+PX4_V118_FAILSAFE_FLAGS_TOPIC_SUFFIX = '/fmu/out/failsafe_flags'
 
 
 @dataclass(frozen=True)

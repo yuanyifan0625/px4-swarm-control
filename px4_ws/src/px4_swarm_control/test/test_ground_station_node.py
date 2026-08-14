@@ -134,6 +134,60 @@ def test_arm_action_rejects_while_paused_without_leaving_pause():
     assert publishers.mission_command.messages[-1].command == MissionCommand.PAUSE
 
 
+def test_arm_action_rejects_offboard_signal_lost_without_publishing_arm_command():
+    core, publishers, _ = make_core()
+    core.handle_vehicle_status(
+        vehicle_status(
+            1,
+            armed=False,
+            nav_state='offboard',
+            vehicle_state='landed',
+            pre_flight_checks_pass=False,
+            offboard_control_signal_lost=True,
+        )
+    )
+    request = ArmSwarm.Goal()
+    request.timeout_sec = 12.0
+
+    feedback = core.start_arm(request)
+    result = core.arm_result()
+
+    assert feedback.current_state == 'idle'
+    assert result.success is False
+    assert result.message == (
+        'arm rejected: MAV1 still in Offboard with lost offboard signal; '
+        'wait for land-complete recovery'
+    )
+    assert publishers.mission_command.messages == []
+
+
+def test_arm_action_rejects_stale_offboard_signal_lost_without_publishing_arm_command():
+    core, publishers, _ = make_core()
+    core.handle_vehicle_status(
+        vehicle_status(
+            1,
+            armed=False,
+            nav_state='offboard',
+            vehicle_state='landed',
+            pre_flight_checks_pass=False,
+            offboard_control_signal_lost=True,
+            last_telemetry_age_sec=5.0,
+        )
+    )
+    request = ArmSwarm.Goal()
+    request.timeout_sec = 12.0
+
+    core.start_arm(request)
+    result = core.arm_result()
+
+    assert result.success is False
+    assert result.message == (
+        'arm rejected: MAV1 still in Offboard with lost offboard signal; '
+        'wait for land-complete recovery'
+    )
+    assert publishers.mission_command.messages == []
+
+
 def test_arm_action_succeeds_after_three_fresh_armed_statuses_while_landed():
     core, _, _ = make_core()
     request = ArmSwarm.Goal()
@@ -1067,6 +1121,8 @@ def vehicle_status(
     last_telemetry_age_sec=0.1,
     slot='',
     vehicle_state='staging',
+    pre_flight_checks_pass=True,
+    offboard_control_signal_lost=False,
 ):
     status = VehicleStatus()
     status.vehicle_id = vehicle_id
@@ -1077,6 +1133,8 @@ def vehicle_status(
     status.armed = armed
     status.nav_state = nav_state
     status.offboard_available = True
+    status.pre_flight_checks_pass = pre_flight_checks_pass
+    status.offboard_control_signal_lost = offboard_control_signal_lost
     status.last_telemetry_age_sec = last_telemetry_age_sec
     status.slot = slot
     status.vehicle_state = vehicle_state

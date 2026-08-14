@@ -82,6 +82,14 @@ class ActionOutcome:
     feedback: object
 
 
+@dataclass(frozen=True)
+class ArmEligibility:
+    """Mission-level decision about whether arm-only may be sent now."""
+
+    eligible: bool
+    rejection: str = ''
+
+
 class GroundStationCore:
     """Mission-level behavior that is testable without spinning ROS."""
 
@@ -129,6 +137,12 @@ class GroundStationCore:
     def start_arm(self, request: ArmSwarm.Goal):
         if self.mission_state is MissionState.PAUSED:
             self._arm_rejection = 'ArmSwarm rejected while swarm is paused'
+            return self.arm_feedback()
+        eligibility = self._arm_eligibility()
+        if not eligibility.eligible:
+            self._arm_started_s = None
+            self._arm_timeout_s = None
+            self._arm_rejection = eligibility.rejection
             return self.arm_feedback()
         self.vehicle_statuses = {}
         self._clear_move_leader_state()
@@ -551,6 +565,17 @@ class GroundStationCore:
             _armed_ready(status, self.config.telemetry_fresh_timeout_s)
             for status in self.vehicle_statuses.values()
         )
+
+    def _arm_eligibility(self) -> ArmEligibility:
+        for vehicle_id in sorted(self.vehicle_statuses):
+            status = self.vehicle_statuses[vehicle_id]
+            rejection = _arm_ineligible_reason(
+                status,
+                self.config.telemetry_fresh_timeout_s,
+            )
+            if rejection:
+                return ArmEligibility(False, rejection)
+        return ArmEligibility(True)
 
     def _count_staged_vehicles(self) -> int:
         return sum(
@@ -1055,6 +1080,31 @@ def _armed_ready(status: VehicleStatus, telemetry_fresh_timeout_s: float) -> boo
         and isfinite(status.last_telemetry_age_sec)
         and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
     )
+
+
+def _arm_ineligible_reason(
+    status: VehicleStatus,
+    telemetry_fresh_timeout_s: float,
+) -> str:
+    if status.armed or status.vehicle_state != VehicleLevelState.LANDED.value:
+        return ''
+    vehicle_name = f'MAV{int(status.vehicle_id)}'
+    if status.nav_state == 'offboard' and status.offboard_control_signal_lost:
+        return (
+            f'arm rejected: {vehicle_name} still in Offboard with lost offboard signal; '
+            'wait for land-complete recovery'
+        )
+    if (
+        not isfinite(status.last_telemetry_age_sec)
+        or status.last_telemetry_age_sec > telemetry_fresh_timeout_s
+    ):
+        return ''
+    if not status.pre_flight_checks_pass:
+        return (
+            f'arm rejected: {vehicle_name} pre-flight checks are not passing; '
+            'inspect vehicle status health'
+        )
+    return ''
 
 
 def main(args=None) -> None:

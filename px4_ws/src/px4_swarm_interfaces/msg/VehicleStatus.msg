@@ -14,5 +14,7 @@ float64 vz
 bool armed
 string nav_state
 bool offboard_available
+bool pre_flight_checks_pass
+bool offboard_control_signal_lost
 float32 last_telemetry_age_sec
 string vehicle_state

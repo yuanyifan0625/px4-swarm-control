@@ -1,6 +1,7 @@
 from math import isnan
 
 from px4_msgs.msg import (
+    FailsafeFlags,
     OffboardControlMode,
     TrajectorySetpoint,
     VehicleCommand,
@@ -16,6 +17,10 @@ from px4_swarm_control.models import (
     VehicleLevelState,
 )
 from px4_swarm_control.px4_vehicle_interface import Px4VehicleInterface
+from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MAIN_MODE_AUTO
+from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MAIN_MODE_OFFBOARD
+from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MODE_ENABLED
+from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_SUB_MODE_AUTO_LOITER
 
 
 class FakePublisher:
@@ -74,6 +79,7 @@ def test_interface_creates_vehicle_namespaced_px4_topics():
         '/MAV2/fmu/out/vehicle_status_v4',
         '/MAV2/fmu/out/vehicle_command_ack_v1',
         '/MAV2/fmu/out/vehicle_land_detected',
+        '/MAV2/fmu/out/failsafe_flags',
     ]
 
 
@@ -120,6 +126,7 @@ def test_vehicle_commands_include_expected_command_ids_and_params():
     interface.takeoff(altitude_m=8.0, yaw=1.2)
     interface.land()
     interface.set_offboard_mode()
+    interface.set_ground_safe_mode()
 
     commands = interface.vehicle_command_publisher.messages
     assert [msg.command for msg in commands] == [
@@ -128,13 +135,17 @@ def test_vehicle_commands_include_expected_command_ids_and_params():
         VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF,
         VehicleCommand.VEHICLE_CMD_NAV_LAND,
         VehicleCommand.VEHICLE_CMD_DO_SET_MODE,
+        VehicleCommand.VEHICLE_CMD_DO_SET_MODE,
     ]
     assert commands[0].param1 == 1.0
     assert commands[1].param1 == 0.0
     assert commands[2].param4 == 1.2
     assert commands[2].param7 == 8.0
-    assert commands[4].param1 == 1.0
-    assert commands[4].param2 == 6.0
+    assert commands[4].param1 == PX4_CUSTOM_MODE_ENABLED
+    assert commands[4].param2 == PX4_CUSTOM_MAIN_MODE_OFFBOARD
+    assert commands[5].param1 == PX4_CUSTOM_MODE_ENABLED
+    assert commands[5].param2 == PX4_CUSTOM_MAIN_MODE_AUTO
+    assert commands[5].param3 == PX4_CUSTOM_SUB_MODE_AUTO_LOITER
     assert all(msg.from_external for msg in commands)
     assert all(msg.timestamp == 4000 for msg in commands)
     assert all(msg.target_system == 3 for msg in commands)
@@ -180,9 +191,14 @@ def test_vehicle_state_converts_latest_px4_telemetry_to_internal_model():
     vehicle_status.arming_state = VehicleStatus.ARMING_STATE_ARMED
     vehicle_status.nav_state = VehicleStatus.NAVIGATION_STATE_OFFBOARD
     vehicle_status.accepts_offboard_setpoints = True
+    vehicle_status.pre_flight_checks_pass = False
+
+    failsafe_flags = FailsafeFlags()
+    failsafe_flags.offboard_control_signal_lost = True
 
     interface.handle_vehicle_local_position(local_position)
     interface.handle_vehicle_status(vehicle_status)
+    interface.handle_failsafe_flags(failsafe_flags)
 
     state = interface.vehicle_state()
     assert state.vehicle_id == 'MAV2'
@@ -192,6 +208,8 @@ def test_vehicle_state_converts_latest_px4_telemetry_to_internal_model():
     assert state.armed is True
     assert state.navigation_state == 'offboard'
     assert state.offboard_available is True
+    assert state.pre_flight_checks_pass is False
+    assert state.offboard_control_signal_lost is True
     assert state.telemetry_age_s == 0.5
     assert state.vehicle_level_state is VehicleLevelState.IDLE
     assert state.landed is False

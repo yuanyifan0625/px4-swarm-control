@@ -111,6 +111,8 @@ class VehicleState:
     telemetry_age_s: float
     vehicle_level_state: VehicleLevelState
     landed: bool = False
+    pre_flight_checks_pass: bool = True
+    offboard_control_signal_lost: bool = False
 
 
 @dataclass(frozen=True)

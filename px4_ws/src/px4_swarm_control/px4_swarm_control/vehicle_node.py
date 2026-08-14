@@ -87,6 +87,7 @@ class VehicleNodeCore:
         self._last_takeoff_command_request_s: Optional[float] = None
         self._offboard_warmup_started_s: Optional[float] = None
         self._last_offboard_mode_request_s: Optional[float] = None
+        self._land_complete_recovery_sent = False
         self._sync_interface_state()
 
     def handle_leader_goal(self, msg: LeaderGoal) -> None:
@@ -144,6 +145,7 @@ class VehicleNodeCore:
             self._takeoff_to_staging_active = False
             self._takeoff_command_sent_for_staging = False
             self._pending_takeoff_until_staging = False
+            self._land_complete_recovery_sent = False
             # 降落代表任務輪次結束，清掉 staging latch 以保護下一輪不吃上一輪目標。
             self._staging_setpoint_received = False
             self._last_takeoff_command_request_s = None
@@ -189,7 +191,7 @@ class VehicleNodeCore:
         if self.vehicle_level_state is VehicleLevelState.LANDING:
             # 降落期間不再送空中 staging setpoint，保護 PX4 landing mode 不被 ROS 2 搶控制權。
             if self._state_is_landed(state):
-                self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
+                self._transition_to_landed(state)
             return
         if self.vehicle_level_state is VehicleLevelState.PAUSED:
             # Pause 每個 tick 都只維持 hover，保護舊 leader/formation 目標不被自動續跑。
@@ -200,7 +202,7 @@ class VehicleNodeCore:
             self._control_takeoff_to_staging(state)
             return
         if self._state_is_landed(state):
-            self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
+            self._transition_to_landed(state)
             return
 
         self.px4_interface.publish_offboard_heartbeat()
@@ -312,6 +314,21 @@ class VehicleNodeCore:
         # PX4 在落地後可能短暫忽略第一個 takeoff，低頻重送保護一次 action 能完成。
         self._send_takeoff_command_to_px4()
 
+    def _transition_to_landed(self, state) -> None:
+        self._run_land_complete_recovery(state)
+        self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
+
+    def _run_land_complete_recovery(self, state) -> None:
+        if self._land_complete_recovery_sent:
+            return
+        if state is None or state.navigation_state != 'offboard':
+            return
+        self.px4_interface.set_ground_safe_mode()
+        self._land_complete_recovery_sent = True
+        self.logger.info(
+            f'{self.config.vehicle_id} LandCompleteRecovery requested GroundSafeMode',
+        )
+
     def _takeoff_altitude_reached(self, state) -> bool:
         return state.position[2] <= (
             self.active_setpoint.z + self.config.takeoff_altitude_tolerance_m
@@ -345,6 +362,7 @@ class VehicleNodeCore:
             return VehicleLevelState.LANDED
         if state.vehicle_level_state is VehicleLevelState.LANDED:
             # PX4 已回報非 landed 時清掉舊狀態，保護下一次 takeoff 不被上次 landing 殘留卡住。
+            self._land_complete_recovery_sent = False
             self.transition_to(VehicleLevelState.HOLDING, 'PX4 airborne telemetry')
             return VehicleLevelState.HOLDING
         return state.vehicle_level_state
@@ -368,6 +386,8 @@ class VehicleNodeCore:
             msg.armed = False
             msg.nav_state = 'unknown'
             msg.offboard_available = False
+            msg.pre_flight_checks_pass = False
+            msg.offboard_control_signal_lost = False
             msg.last_telemetry_age_sec = float('inf')
             msg.vehicle_state = self.vehicle_level_state.value
         else:
@@ -382,7 +402,7 @@ class VehicleNodeCore:
                 return
             status_vehicle_state = self._status_vehicle_level_state(state)
             if status_vehicle_state is VehicleLevelState.LANDED:
-                self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
+                self._transition_to_landed(state)
 
             msg.x, msg.y, msg.z = state.position
             msg.yaw = state.yaw
@@ -390,6 +410,8 @@ class VehicleNodeCore:
             msg.armed = state.armed
             msg.nav_state = state.navigation_state
             msg.offboard_available = state.offboard_available
+            msg.pre_flight_checks_pass = state.pre_flight_checks_pass
+            msg.offboard_control_signal_lost = state.offboard_control_signal_lost
             msg.last_telemetry_age_sec = state.telemetry_age_s
             msg.vehicle_state = status_vehicle_state.value
 
