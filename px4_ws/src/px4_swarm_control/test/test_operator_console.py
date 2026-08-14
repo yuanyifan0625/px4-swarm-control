@@ -208,6 +208,7 @@ def test_operator_console_defaults_use_small_field_operation_profile():
     assert config.move_step_x_m == 1.0
     assert config.move_step_y_m == 1.0
     assert config.yaw_step_rad == pi / 6.0
+    assert config.settle_position_tolerance_m == 0.15
     assert config.settle_vee_lateral_spacing_m == 0.4
     assert config.settle_vee_trail_spacing_m == 0.6928
     assert config.settle_line_abreast_lateral_spacing_m == 0.8
@@ -259,9 +260,9 @@ def test_demo_macro_runs_settle_steps_and_tracks_successful_formation_mode():
     assert gateway.calls == [
         ('takeoff', 1.5, 60.0),
         ('change_formation', 'line_abreast', 60.0),
-        ('settle', 'line_abreast', 1.0, 30.0, 0.5, 0.25),
+        ('settle', 'line_abreast', 1.0, 30.0, 0.15, 0.25),
         ('change_formation', 'vee', 60.0),
-        ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
+        ('settle', 'vee', 1.0, 30.0, 0.15, 0.25),
         ('land', 60.0),
     ]
 
@@ -309,9 +310,9 @@ def test_demo_macro_home_yaw_rotates_current_leader_pose_to_home_yaw_before_home
         ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('move_leader', 2.0, 2.0, -5.0, pi / 6.0, 0.3, 0.2, 60.0),
         ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
-        ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
+        ('settle', 'vee', 1.0, 30.0, 0.15, 0.25),
         ('move_leader', 1.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
-        ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
+        ('settle', 'vee', 1.0, 30.0, 0.15, 0.25),
         ('land', 60.0),
     ]
 
@@ -332,7 +333,7 @@ def test_demo_macro_stops_when_settle_times_out():
     assert 'formation settle timed out' in result.message
     assert gateway.calls == [
         ('takeoff', 1.5, 60.0),
-        ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
+        ('settle', 'vee', 1.0, 30.0, 0.15, 0.25),
     ]
 
 
@@ -386,6 +387,16 @@ def test_formation_settle_ready_rejects_stale_or_misaligned_followers():
     assert formation_settle_ready(statuses, 'vee', OperatorConsoleConfig()) is False
 
     statuses[3] = follower_status(3, 'follower_right', x=9.3072, y=20.2)
+
+    assert formation_settle_ready(statuses, 'vee', OperatorConsoleConfig()) is False
+
+
+def test_formation_settle_ready_rejects_observed_loose_vee_triangle():
+    statuses = {
+        1: leader_status(x=0.97, y=-0.02, z=-1.5, yaw=0.0),
+        2: follower_status(2, 'follower_left', x=0.43, y=0.50, z=-1.5),
+        3: follower_status(3, 'follower_right', x=0.50, y=-0.47, z=-1.5),
+    }
 
     assert formation_settle_ready(statuses, 'vee', OperatorConsoleConfig()) is False
 

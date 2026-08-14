@@ -110,6 +110,7 @@ def test_default_ground_station_config_uses_small_field_operation_profile():
     assert config.formation_vee_lateral_spacing_m == 0.4
     assert config.formation_vee_trail_spacing_m == 0.6928
     assert config.formation_line_abreast_lateral_spacing_m == 0.8
+    assert config.formation_position_tolerance_m == 0.15
 
 
 def test_arm_action_publishes_arm_command_without_staging_or_takeoff():
@@ -596,6 +597,42 @@ def test_change_formation_progress_and_success_wait_for_followers_inside_toleran
     assert result.message == 'formation established'
     assert core.mission_state is MissionState.FOLLOWING
     assert 'formation established' in logger.infos
+
+
+def test_change_formation_rejects_observed_loose_vee_triangle():
+    core, _, _ = make_core()
+    core.mission_state = MissionState.FOLLOWING
+    request = ChangeFormation.Goal()
+    request.formation_mode = FormationMode.VEE
+    request.timeout_sec = 8.0
+    core.start_change_formation(request)
+
+    core.handle_vehicle_status(
+        vehicle_status(1, x=0.97, y=-0.02, z=-1.5, yaw=0.0, vehicle_state='following'),
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            2,
+            x=0.43,
+            y=0.50,
+            z=-1.5,
+            slot='follower_left',
+            vehicle_state='following',
+        ),
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            3,
+            x=0.50,
+            y=-0.47,
+            z=-1.5,
+            slot='follower_right',
+            vehicle_state='following',
+        ),
+    )
+
+    assert core.change_formation_feedback().progress == 0.0
+    assert core.change_formation_result() is None
 
 
 def test_change_formation_rejects_stale_status_and_wrong_follower_slots():

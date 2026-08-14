@@ -61,7 +61,7 @@ ground_station_node:
     formation_vee_lateral_spacing_m: 0.4
     formation_vee_trail_spacing_m: 0.6928
     formation_line_abreast_lateral_spacing_m: 0.8
-    formation_position_tolerance_m: 0.3
+    formation_position_tolerance_m: 0.15
     formation_yaw_tolerance_rad: 0.2
     telemetry_fresh_timeout_s: 1.0
     staging_yaw_rad: 0.0

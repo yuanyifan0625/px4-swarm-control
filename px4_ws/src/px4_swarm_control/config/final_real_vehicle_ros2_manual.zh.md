@@ -33,6 +33,7 @@ Pi-MAV3
 - `/MAV1`、`/MAV2`、`/MAV3` 是唯一支援 namespace；不支援 `/vehicle_1`、`/vehicle_2`、`/vehicle_3`。
 - `px4_msgs` 必須和實際 PX4 bridge topic suffix 相容。
 - 正式操作只在地面站跑一個 active `operator_console`。
+- 小場地隊形完成 tolerance 預設 `0.15 m`；實機若無法穩定收斂，先調 `three_vehicle_nodes.yaml` 的 `formation_position_tolerance_m` 和 `operator_console.yaml` 的 `settle_position_tolerance_m`。
 
 調整：`ROS_DOMAIN_ID` 要在每台機器設同一值，例如 `export ROS_DOMAIN_ID=13`。
 
@@ -158,7 +159,7 @@ ros2 run px4_swarm_control operator_console
 - `8`：全隊 land。
 - `9`：完整 demo macro。
 
-驗收條件：所有 movement/formation command 都只經 `/swarm` action，followers 由各自 vehicle node 追隊形。調整：高度、步距、yaw 改 `operator_console.yaml`；隊形幾何改 `three_vehicle_nodes.yaml`。
+驗收條件：所有 movement/formation command 都只經 `/swarm` action，followers 由各自 vehicle node 追隊形。調整：高度、步距、yaw、console settle tolerance 改 `operator_console.yaml`；隊形幾何和 ground-station formation tolerance 改 `three_vehicle_nodes.yaml`。
 
 ## 8. 實機 smoke test checklist
 

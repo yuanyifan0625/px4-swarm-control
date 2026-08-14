@@ -9,11 +9,12 @@
 - command `5`：leader yaw `30 deg`
 - `vee`：邊長 `0.8 m` 正三角形，`vee_lateral=0.4`、`vee_trail=0.6928`
 - `line_abreast`：leader 到左右 follower 各 `0.8 m`
+- formation/settle 完成 tolerance：`0.15 m`
 
 調整位置：
 
 - vehicle/ground-station geometry：`px4_ws/src/px4_swarm_control/config/three_vehicle_nodes.yaml`
-- console 指令步距：`px4_ws/src/px4_swarm_control/config/operator_console.yaml`
+- console 指令步距與 settle tolerance：`px4_ws/src/px4_swarm_control/config/operator_console.yaml`
 
 ## 0. 清乾淨 runtime
 
@@ -162,7 +163,7 @@ r
 - `7` 形成 `line_abreast`，`6` 回到 `vee`。
 - pause 時 `2` 被拒絕，resume 後 `8` land 成功。
 
-調整：步距與 yaw 改 `operator_console.yaml`；隊形距離改 `three_vehicle_nodes.yaml`。
+調整：步距與 yaw 改 `operator_console.yaml`；隊形距離和 ground-station formation tolerance 改 `three_vehicle_nodes.yaml`；console settle tolerance 改 `operator_console.yaml`。
 
 ## 8. 完整 demo macro
 

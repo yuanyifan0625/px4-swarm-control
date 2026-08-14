@@ -12,7 +12,7 @@ operator_console:
     status_wait_timeout_s: 2.0
     settle_stable_duration_s: 1.0
     settle_timeout_sec: 30.0
-    settle_position_tolerance_m: 0.5
+    settle_position_tolerance_m: 0.15
     settle_yaw_tolerance_rad: 0.25
     settle_telemetry_timeout_s: 1.0
     settle_vee_lateral_spacing_m: 0.4

@@ -21,6 +21,7 @@ from px4_swarm_control.geometry import (
 )
 from px4_swarm_control.models import FormationMode, PositionYawSetpoint, Slot
 from px4_swarm_control.operation_profile import ALTITUDE_STEP_M
+from px4_swarm_control.operation_profile import FORMATION_POSITION_TOLERANCE_M
 from px4_swarm_control.operation_profile import LINE_ABREAST_LATERAL_SPACING_M
 from px4_swarm_control.operation_profile import MOVE_STEP_X_M
 from px4_swarm_control.operation_profile import MOVE_STEP_Y_M
@@ -63,7 +64,7 @@ class OperatorConsoleConfig:
     status_wait_timeout_s: float = 2.0
     settle_stable_duration_s: float = 1.0
     settle_timeout_sec: float = 30.0
-    settle_position_tolerance_m: float = 0.5
+    settle_position_tolerance_m: float = FORMATION_POSITION_TOLERANCE_M
     settle_yaw_tolerance_rad: float = 0.25
     settle_telemetry_timeout_s: float = 1.0
     settle_vee_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
@@ -455,7 +456,10 @@ class OperatorConsoleNode(Node):
         self.declare_parameter('status_wait_timeout_s', 2.0)
         self.declare_parameter('settle_stable_duration_s', 1.0)
         self.declare_parameter('settle_timeout_sec', 30.0)
-        self.declare_parameter('settle_position_tolerance_m', 0.5)
+        self.declare_parameter(
+            'settle_position_tolerance_m',
+            FORMATION_POSITION_TOLERANCE_M,
+        )
         self.declare_parameter('settle_yaw_tolerance_rad', 0.25)
         self.declare_parameter('settle_telemetry_timeout_s', 1.0)
         self.declare_parameter('settle_vee_lateral_spacing_m', VEE_LATERAL_SPACING_M)

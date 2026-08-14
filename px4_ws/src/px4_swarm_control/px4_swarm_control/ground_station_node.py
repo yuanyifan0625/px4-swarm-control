@@ -22,6 +22,7 @@ from px4_swarm_control.models import FormationMode as InternalFormationMode
 from px4_swarm_control.models import MissionState
 from px4_swarm_control.models import PositionYawSetpoint
 from px4_swarm_control.models import VehicleLevelState
+from px4_swarm_control.operation_profile import FORMATION_POSITION_TOLERANCE_M
 from px4_swarm_control.operation_profile import LINE_ABREAST_LATERAL_SPACING_M
 from px4_swarm_control.operation_profile import VEE_LATERAL_SPACING_M
 from px4_swarm_control.operation_profile import VEE_TRAIL_SPACING_M
@@ -61,7 +62,7 @@ class GroundStationConfig:
     formation_vee_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
     formation_vee_trail_spacing_m: float = VEE_TRAIL_SPACING_M
     formation_line_abreast_lateral_spacing_m: float = LINE_ABREAST_LATERAL_SPACING_M
-    formation_position_tolerance_m: float = 0.3
+    formation_position_tolerance_m: float = FORMATION_POSITION_TOLERANCE_M
     formation_yaw_tolerance_rad: float = 0.2
     telemetry_fresh_timeout_s: float = 1.0
     staging_yaw_rad: float = 0.0
@@ -1006,7 +1007,10 @@ class GroundStationNode(Node):
             'formation_line_abreast_lateral_spacing_m',
             LINE_ABREAST_LATERAL_SPACING_M,
         )
-        self.declare_parameter('formation_position_tolerance_m', 0.3)
+        self.declare_parameter(
+            'formation_position_tolerance_m',
+            FORMATION_POSITION_TOLERANCE_M,
+        )
         self.declare_parameter('formation_yaw_tolerance_rad', 0.2)
         self.declare_parameter('telemetry_fresh_timeout_s', 1.0)
         self.declare_parameter('staging_yaw_rad', 0.0)
