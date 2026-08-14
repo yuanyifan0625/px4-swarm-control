@@ -130,3 +130,57 @@ def test_final_real_vehicle_doc_names_distributed_launches_and_mav_contract():
     assert '/MAV2/fmu/out/vehicle_status_v4' in text
     assert '/MAV3/fmu/out/vehicle_command_ack_v1' in text
     assert '/vehicle_1' in text
+
+
+def test_coordinate_frame_probe_docs_and_executable_are_registered():
+    package_root = Path(__file__).parents[1]
+    setup_text = (package_root / 'setup.py').read_text()
+    sitl_doc = (
+        package_root / 'config' / 'final_sitl_coordinate_frame_command_probe.zh.md'
+    ).read_text()
+    real_doc = (
+        package_root / 'config' / 'final_real_coordinate_frame_manual_probe.zh.md'
+    ).read_text()
+
+    assert 'coordinate_frame_probe = px4_swarm_control.coordinate_frame_probe:main' in setup_text
+    assert 'ros2 run px4_swarm_control coordinate_frame_probe' in sitl_doc
+    assert 'mode:=commanded' in sitl_doc
+    assert '/home/ncrl/docker_ubuntu24' in sitl_doc
+    assert 'PX4 +X' in sitl_doc
+    assert 'Gazebo +Y' in sitl_doc
+    assert 'ros2 run px4_swarm_control coordinate_frame_probe' in real_doc
+    assert 'mode:=manual' in real_doc
+    assert '/MAV1/fmu/out/vehicle_local_position_v1' in real_doc
+    assert '/MAV1/status' in real_doc
+    assert 'WARNING' in real_doc
+
+
+def test_field_frame_console_docs_and_executable_are_registered():
+    package_root = Path(__file__).parents[1]
+    setup_text = (package_root / 'setup.py').read_text()
+    sitl_doc = (
+        package_root / 'config' / 'final_sitl_field_frame_console_command.zh.md'
+    ).read_text()
+    real_doc = (
+        package_root / 'config' / 'final_real_field_frame_console_manual.zh.md'
+    ).read_text()
+
+    assert 'field_frame_console = px4_swarm_control.field_frame_console:main' in setup_text
+    assert 'ros2 run px4_swarm_control field_frame_console' in sitl_doc
+    assert 'field_x_axis:=px4_y' in sitl_doc
+    assert 'field_y_axis:=px4_x' in sitl_doc
+    assert 'field_up_sign:=negative' in sitl_doc
+    assert 'Gazebo visual profile' in sitl_doc
+    assert 's / status' in sitl_doc
+    assert 'p / pause' in sitl_doc
+    assert 'home_yaw' in sitl_doc
+    assert '9 demo' in sitl_doc
+    assert 'ros2 run px4_swarm_control field_frame_console' in real_doc
+    assert 'coordinate_frame_probe' in real_doc
+    assert 'field_x_sign' in real_doc
+    assert 'Gazebo visual profile' in real_doc
+    assert 's / status' in real_doc
+    assert 'p / pause' in real_doc
+    assert 'home_yaw' in real_doc
+    assert 'operator_console' in real_doc
+    assert 'raw PX4 local NED' in real_doc
