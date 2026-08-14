@@ -20,6 +20,15 @@ from px4_swarm_control.geometry import (
     FormationGeometry,
 )
 from px4_swarm_control.models import FormationMode, PositionYawSetpoint, Slot
+from px4_swarm_control.operation_profile import ALTITUDE_STEP_M
+from px4_swarm_control.operation_profile import LINE_ABREAST_LATERAL_SPACING_M
+from px4_swarm_control.operation_profile import MOVE_STEP_X_M
+from px4_swarm_control.operation_profile import MOVE_STEP_Y_M
+from px4_swarm_control.operation_profile import TAKEOFF_ALTITUDE_M
+from px4_swarm_control.operation_profile import VEE_LATERAL_SPACING_M
+from px4_swarm_control.operation_profile import VEE_TRAIL_SPACING_M
+from px4_swarm_control.operation_profile import YAW_STEP_DEG
+from px4_swarm_control.operation_profile import YAW_STEP_RAD
 from px4_swarm_interfaces.action import (
     ArmSwarm,
     ChangeFormation,
@@ -43,12 +52,12 @@ class ConsoleActionResult:
 class OperatorConsoleConfig:
     """Configurable defaults for short operator commands."""
 
-    takeoff_altitude_m: float = 5.0
+    takeoff_altitude_m: float = TAKEOFF_ALTITUDE_M
     default_timeout_sec: float = 60.0
-    move_step_x_m: float = 3.0
-    move_step_y_m: float = 3.0
-    altitude_step_m: float = 1.0
-    yaw_step_rad: float = pi / 3.0
+    move_step_x_m: float = MOVE_STEP_X_M
+    move_step_y_m: float = MOVE_STEP_Y_M
+    altitude_step_m: float = ALTITUDE_STEP_M
+    yaw_step_rad: float = YAW_STEP_RAD
     move_position_tolerance_m: float = 0.3
     move_yaw_tolerance_rad: float = 0.2
     status_wait_timeout_s: float = 2.0
@@ -57,8 +66,9 @@ class OperatorConsoleConfig:
     settle_position_tolerance_m: float = 0.5
     settle_yaw_tolerance_rad: float = 0.25
     settle_telemetry_timeout_s: float = 1.0
-    settle_lateral_spacing_m: float = 4.0
-    settle_trail_spacing_m: float = 3.0
+    settle_vee_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
+    settle_vee_trail_spacing_m: float = VEE_TRAIL_SPACING_M
+    settle_line_abreast_lateral_spacing_m: float = LINE_ABREAST_LATERAL_SPACING_M
     demo_commands: tuple[str, ...] = (
         '1',
         '2',
@@ -434,12 +444,12 @@ class OperatorConsoleNode(Node):
         self.dispatcher = ConsoleCommandDispatcher(self.config, self.gateway)
 
     def _declare_parameters(self) -> None:
-        self.declare_parameter('takeoff_altitude_m', 5.0)
+        self.declare_parameter('takeoff_altitude_m', TAKEOFF_ALTITUDE_M)
         self.declare_parameter('default_timeout_sec', 60.0)
-        self.declare_parameter('move_step_x_m', 3.0)
-        self.declare_parameter('move_step_y_m', 3.0)
-        self.declare_parameter('altitude_step_m', 1.0)
-        self.declare_parameter('yaw_step_deg', 60.0)
+        self.declare_parameter('move_step_x_m', MOVE_STEP_X_M)
+        self.declare_parameter('move_step_y_m', MOVE_STEP_Y_M)
+        self.declare_parameter('altitude_step_m', ALTITUDE_STEP_M)
+        self.declare_parameter('yaw_step_deg', YAW_STEP_DEG)
         self.declare_parameter('move_position_tolerance_m', 0.3)
         self.declare_parameter('move_yaw_tolerance_rad', 0.2)
         self.declare_parameter('status_wait_timeout_s', 2.0)
@@ -448,8 +458,12 @@ class OperatorConsoleNode(Node):
         self.declare_parameter('settle_position_tolerance_m', 0.5)
         self.declare_parameter('settle_yaw_tolerance_rad', 0.25)
         self.declare_parameter('settle_telemetry_timeout_s', 1.0)
-        self.declare_parameter('settle_lateral_spacing_m', 4.0)
-        self.declare_parameter('settle_trail_spacing_m', 3.0)
+        self.declare_parameter('settle_vee_lateral_spacing_m', VEE_LATERAL_SPACING_M)
+        self.declare_parameter('settle_vee_trail_spacing_m', VEE_TRAIL_SPACING_M)
+        self.declare_parameter(
+            'settle_line_abreast_lateral_spacing_m',
+            LINE_ABREAST_LATERAL_SPACING_M,
+        )
         self.declare_parameter(
             'demo_commands',
             [
@@ -497,10 +511,15 @@ class OperatorConsoleNode(Node):
             settle_telemetry_timeout_s=float(
                 self.get_parameter('settle_telemetry_timeout_s').value
             ),
-            settle_lateral_spacing_m=float(
-                self.get_parameter('settle_lateral_spacing_m').value
+            settle_vee_lateral_spacing_m=float(
+                self.get_parameter('settle_vee_lateral_spacing_m').value
             ),
-            settle_trail_spacing_m=float(self.get_parameter('settle_trail_spacing_m').value),
+            settle_vee_trail_spacing_m=float(
+                self.get_parameter('settle_vee_trail_spacing_m').value
+            ),
+            settle_line_abreast_lateral_spacing_m=float(
+                self.get_parameter('settle_line_abreast_lateral_spacing_m').value
+            ),
             demo_commands=tuple(self.get_parameter('demo_commands').value),
         )
 
@@ -630,8 +649,11 @@ def _formation_target_for_follower(
     config: OperatorConsoleConfig,
 ) -> PositionYawSetpoint:
     geometry = FormationGeometry(
-        lateral_spacing_m=config.settle_lateral_spacing_m,
-        trail_spacing_m=config.settle_trail_spacing_m,
+        vee_lateral_spacing_m=config.settle_vee_lateral_spacing_m,
+        vee_trail_spacing_m=config.settle_vee_trail_spacing_m,
+        line_abreast_lateral_spacing_m=(
+            config.settle_line_abreast_lateral_spacing_m
+        ),
     )
     leader = PositionYawSetpoint(
         leader_status.x,

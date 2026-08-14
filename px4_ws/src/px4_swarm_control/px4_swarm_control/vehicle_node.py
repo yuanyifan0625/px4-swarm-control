@@ -26,6 +26,9 @@ from px4_swarm_control.models import (
     VehicleLevelState,
     VehicleRole,
 )
+from px4_swarm_control.operation_profile import LINE_ABREAST_LATERAL_SPACING_M
+from px4_swarm_control.operation_profile import VEE_LATERAL_SPACING_M
+from px4_swarm_control.operation_profile import VEE_TRAIL_SPACING_M
 from px4_swarm_control.px4_vehicle_interface import Px4VehicleInterface
 from px4_swarm_interfaces.msg import FormationMode as SwarmFormationMode
 from px4_swarm_interfaces.msg import LeaderGoal
@@ -53,8 +56,9 @@ class VehicleNodeConfig:
     takeoff_altitude_tolerance_m: float = 1.0
     offboard_warmup_s: float = 1.0
     offboard_mode_retry_s: float = 1.0
-    following_lateral_spacing_m: float = 4.0
-    following_trail_spacing_m: float = 3.0
+    following_vee_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
+    following_vee_trail_spacing_m: float = VEE_TRAIL_SPACING_M
+    following_line_abreast_lateral_spacing_m: float = LINE_ABREAST_LATERAL_SPACING_M
 
 
 class VehicleNodeCore:
@@ -244,8 +248,11 @@ class VehicleNodeCore:
         ):
             return False
         geometry = FormationGeometry(
-            lateral_spacing_m=self.config.following_lateral_spacing_m,
-            trail_spacing_m=self.config.following_trail_spacing_m,
+            vee_lateral_spacing_m=self.config.following_vee_lateral_spacing_m,
+            vee_trail_spacing_m=self.config.following_vee_trail_spacing_m,
+            line_abreast_lateral_spacing_m=(
+                self.config.following_line_abreast_lateral_spacing_m
+            ),
         )
         self.active_setpoint = derive_follower_setpoint(
             leader_status_setpoint(self.leader_status),
@@ -511,8 +518,12 @@ class VehicleNode(Node):
         self.declare_parameter('takeoff_altitude_tolerance_m', 1.0)
         self.declare_parameter('offboard_warmup_s', 1.0)
         self.declare_parameter('offboard_mode_retry_s', 1.0)
-        self.declare_parameter('following_lateral_spacing_m', 4.0)
-        self.declare_parameter('following_trail_spacing_m', 3.0)
+        self.declare_parameter('following_vee_lateral_spacing_m', VEE_LATERAL_SPACING_M)
+        self.declare_parameter('following_vee_trail_spacing_m', VEE_TRAIL_SPACING_M)
+        self.declare_parameter(
+            'following_line_abreast_lateral_spacing_m',
+            LINE_ABREAST_LATERAL_SPACING_M,
+        )
         self.declare_parameter('hold_x', 0.0)
         self.declare_parameter('hold_y', 0.0)
         self.declare_parameter('hold_z', -2.0)
@@ -531,8 +542,9 @@ class VehicleNode(Node):
             'takeoff_altitude_tolerance_m',
             'offboard_warmup_s',
             'offboard_mode_retry_s',
-            'following_lateral_spacing_m',
-            'following_trail_spacing_m',
+            'following_vee_lateral_spacing_m',
+            'following_vee_trail_spacing_m',
+            'following_line_abreast_lateral_spacing_m',
             'hold_x',
             'hold_y',
             'hold_z',
@@ -552,8 +564,24 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
     )
     offboard_warmup_s = float(values.get('offboard_warmup_s', 1.0))
     offboard_mode_retry_s = float(values.get('offboard_mode_retry_s', 1.0))
-    following_lateral_spacing_m = float(values.get('following_lateral_spacing_m', 4.0))
-    following_trail_spacing_m = float(values.get('following_trail_spacing_m', 3.0))
+    following_vee_lateral_spacing_m = _spacing_value(
+        values,
+        'following_vee_lateral_spacing_m',
+        'following_lateral_spacing_m',
+        VEE_LATERAL_SPACING_M,
+    )
+    following_vee_trail_spacing_m = _spacing_value(
+        values,
+        'following_vee_trail_spacing_m',
+        'following_trail_spacing_m',
+        VEE_TRAIL_SPACING_M,
+    )
+    following_line_abreast_lateral_spacing_m = _spacing_value(
+        values,
+        'following_line_abreast_lateral_spacing_m',
+        'following_lateral_spacing_m',
+        LINE_ABREAST_LATERAL_SPACING_M,
+    )
 
     if control_loop_hz <= 0.0:
         raise ValueError('control_loop_hz must be positive')
@@ -567,10 +595,12 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         raise ValueError('offboard_warmup_s must be positive')
     if offboard_mode_retry_s <= 0.0:
         raise ValueError('offboard_mode_retry_s must be positive')
-    if following_lateral_spacing_m <= 0.0:
-        raise ValueError('following_lateral_spacing_m must be positive')
-    if following_trail_spacing_m <= 0.0:
-        raise ValueError('following_trail_spacing_m must be positive')
+    if following_vee_lateral_spacing_m <= 0.0:
+        raise ValueError('following_vee_lateral_spacing_m must be positive')
+    if following_vee_trail_spacing_m <= 0.0:
+        raise ValueError('following_vee_trail_spacing_m must be positive')
+    if following_line_abreast_lateral_spacing_m <= 0.0:
+        raise ValueError('following_line_abreast_lateral_spacing_m must be positive')
 
     config = VehicleNodeConfig(
         role=role,
@@ -592,8 +622,9 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         takeoff_altitude_tolerance_m=takeoff_altitude_tolerance_m,
         offboard_warmup_s=offboard_warmup_s,
         offboard_mode_retry_s=offboard_mode_retry_s,
-        following_lateral_spacing_m=following_lateral_spacing_m,
-        following_trail_spacing_m=following_trail_spacing_m,
+        following_vee_lateral_spacing_m=following_vee_lateral_spacing_m,
+        following_vee_trail_spacing_m=following_vee_trail_spacing_m,
+        following_line_abreast_lateral_spacing_m=following_line_abreast_lateral_spacing_m,
     )
     _validate_first_version_mapping(config)
     return config
@@ -657,6 +688,20 @@ def _target_system_for_values(values: Dict[str, Any]) -> int:
     if target_system < 0 or target_system > 255:
         raise ValueError('px4_target_system must fit uint8, or 0 for broadcast')
     return target_system
+
+
+def _spacing_value(
+    values: Dict[str, Any],
+    parameter_name: str,
+    legacy_parameter_name: str,
+    default: float,
+) -> float:
+    return float(
+        values.get(
+            parameter_name,
+            values.get(legacy_parameter_name, default),
+        ),
+    )
 
 
 def main(args=None) -> None:

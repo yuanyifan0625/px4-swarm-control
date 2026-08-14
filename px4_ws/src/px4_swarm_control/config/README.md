@@ -1,5 +1,10 @@
 # px4_swarm_control config
 
+Final manual verification guides:
+
+- `final_sitl_manual_smoke.zh.md`: SITL/manual ROS 2 smoke flow from inside the container.
+- `final_real_vehicle_ros2_manual.zh.md`: real-vehicle ROS 2 deployment and operation guide.
+
 ## Ticket 05b live PX4 Gz bridge smoke flow
 
 PX4 SITL, Gazebo, and Micro XRCE-DDS Agent are external prerequisites for the

@@ -22,6 +22,9 @@ from px4_swarm_control.models import FormationMode as InternalFormationMode
 from px4_swarm_control.models import MissionState
 from px4_swarm_control.models import PositionYawSetpoint
 from px4_swarm_control.models import VehicleLevelState
+from px4_swarm_control.operation_profile import LINE_ABREAST_LATERAL_SPACING_M
+from px4_swarm_control.operation_profile import VEE_LATERAL_SPACING_M
+from px4_swarm_control.operation_profile import VEE_TRAIL_SPACING_M
 from px4_swarm_interfaces.action import (
     ArmSwarm,
     ChangeFormation,
@@ -52,11 +55,12 @@ class GroundStationConfig:
 
     total_vehicles: int = 3
     active_formation: str = InternalFormationMode.VEE.value
-    staging_lateral_spacing_m: float = 4.0
-    staging_trail_spacing_m: float = 3.0
+    staging_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
+    staging_trail_spacing_m: float = VEE_TRAIL_SPACING_M
     staging_position_tolerance_m: float = 0.5
-    formation_lateral_spacing_m: float = 4.0
-    formation_trail_spacing_m: float = 3.0
+    formation_vee_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
+    formation_vee_trail_spacing_m: float = VEE_TRAIL_SPACING_M
+    formation_line_abreast_lateral_spacing_m: float = LINE_ABREAST_LATERAL_SPACING_M
     formation_position_tolerance_m: float = 0.3
     formation_yaw_tolerance_rad: float = 0.2
     telemetry_fresh_timeout_s: float = 1.0
@@ -489,8 +493,11 @@ class GroundStationCore:
     def _publish_staging_setpoints(self, altitude_m: float) -> None:
         # 起飛 staging 固定用 world frame，保護三機在離地前後維持水平安全間距。
         geometry = FormationGeometry(
-            lateral_spacing_m=self.config.staging_lateral_spacing_m,
-            trail_spacing_m=self.config.staging_trail_spacing_m,
+            vee_lateral_spacing_m=self.config.staging_lateral_spacing_m,
+            vee_trail_spacing_m=self.config.staging_trail_spacing_m,
+            line_abreast_lateral_spacing_m=(
+                self.config.formation_line_abreast_lateral_spacing_m
+            ),
         )
         leader = PositionYawSetpoint(
             x=0.0,
@@ -742,8 +749,11 @@ class GroundStationCore:
         vehicle,
     ) -> PositionYawSetpoint:
         geometry = FormationGeometry(
-            lateral_spacing_m=self.config.formation_lateral_spacing_m,
-            trail_spacing_m=self.config.formation_trail_spacing_m,
+            vee_lateral_spacing_m=self.config.formation_vee_lateral_spacing_m,
+            vee_trail_spacing_m=self.config.formation_vee_trail_spacing_m,
+            line_abreast_lateral_spacing_m=(
+                self.config.formation_line_abreast_lateral_spacing_m
+            ),
         )
         leader = PositionYawSetpoint(
             leader_status.x,
@@ -793,7 +803,8 @@ class GroundStationNode(Node):
     def __init__(self) -> None:
         super().__init__('ground_station_node', namespace='/swarm')
         self.callback_group = ReentrantCallbackGroup()
-        self.config = default_ground_station_config()
+        self._declare_parameters()
+        self.config = self._load_config()
         publishers = GroundStationPublishers(
             mission_command=self.create_publisher(MissionCommand, 'mission_command', 10),
             leader_goal=self.create_publisher(LeaderGoal, 'leader_goal', 10),
@@ -984,6 +995,54 @@ class GroundStationNode(Node):
 
     def _now_stamp(self) -> Time:
         return self.get_clock().now().to_msg()
+
+    def _declare_parameters(self) -> None:
+        self.declare_parameter('staging_lateral_spacing_m', VEE_LATERAL_SPACING_M)
+        self.declare_parameter('staging_trail_spacing_m', VEE_TRAIL_SPACING_M)
+        self.declare_parameter('staging_position_tolerance_m', 0.5)
+        self.declare_parameter('formation_vee_lateral_spacing_m', VEE_LATERAL_SPACING_M)
+        self.declare_parameter('formation_vee_trail_spacing_m', VEE_TRAIL_SPACING_M)
+        self.declare_parameter(
+            'formation_line_abreast_lateral_spacing_m',
+            LINE_ABREAST_LATERAL_SPACING_M,
+        )
+        self.declare_parameter('formation_position_tolerance_m', 0.3)
+        self.declare_parameter('formation_yaw_tolerance_rad', 0.2)
+        self.declare_parameter('telemetry_fresh_timeout_s', 1.0)
+        self.declare_parameter('staging_yaw_rad', 0.0)
+
+    def _load_config(self) -> GroundStationConfig:
+        return GroundStationConfig(
+            total_vehicles=len(FIRST_VERSION_VEHICLES),
+            staging_lateral_spacing_m=float(
+                self.get_parameter('staging_lateral_spacing_m').value,
+            ),
+            staging_trail_spacing_m=float(
+                self.get_parameter('staging_trail_spacing_m').value,
+            ),
+            staging_position_tolerance_m=float(
+                self.get_parameter('staging_position_tolerance_m').value,
+            ),
+            formation_vee_lateral_spacing_m=float(
+                self.get_parameter('formation_vee_lateral_spacing_m').value,
+            ),
+            formation_vee_trail_spacing_m=float(
+                self.get_parameter('formation_vee_trail_spacing_m').value,
+            ),
+            formation_line_abreast_lateral_spacing_m=float(
+                self.get_parameter('formation_line_abreast_lateral_spacing_m').value,
+            ),
+            formation_position_tolerance_m=float(
+                self.get_parameter('formation_position_tolerance_m').value,
+            ),
+            formation_yaw_tolerance_rad=float(
+                self.get_parameter('formation_yaw_tolerance_rad').value,
+            ),
+            telemetry_fresh_timeout_s=float(
+                self.get_parameter('telemetry_fresh_timeout_s').value,
+            ),
+            staging_yaw_rad=float(self.get_parameter('staging_yaw_rad').value),
+        )
 
 
 def default_ground_station_config() -> GroundStationConfig:

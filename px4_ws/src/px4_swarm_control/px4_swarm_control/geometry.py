@@ -6,14 +6,60 @@ from dataclasses import dataclass
 from math import cos, sin
 
 from px4_swarm_control.models import FormationMode, PositionYawSetpoint, Slot, Vector3
+from px4_swarm_control.operation_profile import LINE_ABREAST_LATERAL_SPACING_M
+from px4_swarm_control.operation_profile import VEE_LATERAL_SPACING_M
+from px4_swarm_control.operation_profile import VEE_TRAIL_SPACING_M
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class FormationGeometry:
     """Tunable spacing used by staging and formation helpers."""
 
-    lateral_spacing_m: float
-    trail_spacing_m: float
+    vee_lateral_spacing_m: float
+    vee_trail_spacing_m: float
+    line_abreast_lateral_spacing_m: float
+
+    def __init__(
+        self,
+        vee_lateral_spacing_m: float | None = None,
+        vee_trail_spacing_m: float | None = None,
+        line_abreast_lateral_spacing_m: float | None = None,
+        *,
+        lateral_spacing_m: float | None = None,
+        trail_spacing_m: float | None = None,
+    ) -> None:
+        """Create formation geometry.
+
+        ``lateral_spacing_m`` and ``trail_spacing_m`` are legacy aliases kept
+        for older launch/test overrides. New callers should pass the explicit
+        VEE and line-abreast fields.
+        """
+        if vee_lateral_spacing_m is None:
+            vee_lateral_spacing_m = (
+                VEE_LATERAL_SPACING_M
+                if lateral_spacing_m is None
+                else lateral_spacing_m
+            )
+        if vee_trail_spacing_m is None:
+            vee_trail_spacing_m = (
+                VEE_TRAIL_SPACING_M
+                if trail_spacing_m is None
+                else trail_spacing_m
+            )
+        if line_abreast_lateral_spacing_m is None:
+            line_abreast_lateral_spacing_m = (
+                LINE_ABREAST_LATERAL_SPACING_M
+                if lateral_spacing_m is None
+                else lateral_spacing_m
+            )
+
+        object.__setattr__(self, 'vee_lateral_spacing_m', vee_lateral_spacing_m)
+        object.__setattr__(self, 'vee_trail_spacing_m', vee_trail_spacing_m)
+        object.__setattr__(
+            self,
+            'line_abreast_lateral_spacing_m',
+            line_abreast_lateral_spacing_m,
+        )
 
 
 def formation_body_offset(
@@ -25,11 +71,14 @@ def formation_body_offset(
     if slot is Slot.LEADER:
         return (0.0, 0.0, 0.0)
 
-    left_m = _slot_left_distance(slot, geometry.lateral_spacing_m)
-
     if formation_mode is FormationMode.VEE:
-        return (-geometry.trail_spacing_m, left_m, 0.0)
+        left_m = _slot_left_distance(slot, geometry.vee_lateral_spacing_m)
+        return (-geometry.vee_trail_spacing_m, left_m, 0.0)
     if formation_mode is FormationMode.LINE_ABREAST:
+        left_m = _slot_left_distance(
+            slot,
+            geometry.line_abreast_lateral_spacing_m,
+        )
         return (0.0, left_m, 0.0)
 
     raise ValueError(f'unsupported formation mode: {formation_mode}')

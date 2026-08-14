@@ -9,3 +9,10 @@
 
 PX4 SITL, Gazebo, Micro XRCE-DDS Agent, QGC, `operator_console`, and PX4 speed
 profile commands are external workflow steps, not launch-file children.
+
+Real-deployment launch files start one ROS 2 node each:
+
+- `real_mav1_vehicle.launch.py`
+- `real_mav2_vehicle.launch.py`
+- `real_mav3_vehicle.launch.py`
+- `real_ground_station.launch.py`

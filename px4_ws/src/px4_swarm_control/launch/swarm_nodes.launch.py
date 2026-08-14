@@ -20,11 +20,25 @@ def _load_vehicle_parameters(config_path: Path) -> dict[str, dict[str, object]]:
     return {
         vehicle_id: node_config['ros__parameters']
         for vehicle_id, node_config in data.items()
+        if vehicle_id.startswith('MAV')
     }
 
 
+def _load_ground_station_parameters(config_path: Path) -> dict[str, object]:
+    data = yaml.safe_load(config_path.read_text(encoding='utf-8')) or {}
+    try:
+        return data['ground_station_node']['ros__parameters']
+    except KeyError as exc:
+        raise ValueError(
+            'three_vehicle_nodes.yaml must define '
+            'ground_station_node.ros__parameters',
+        ) from exc
+
+
 def generate_launch_description() -> LaunchDescription:
-    vehicle_parameters = _load_vehicle_parameters(_config_path())
+    config_path = _config_path()
+    vehicle_parameters = _load_vehicle_parameters(config_path)
+    ground_station_parameters = _load_ground_station_parameters(config_path)
     nodes = []
     for vehicle in FIRST_VERSION_VEHICLES:
         # 由同一份 MAV YAML 取 role/slot/target，保護 launch 時不把三台飛機接錯。
@@ -42,6 +56,7 @@ def generate_launch_description() -> LaunchDescription:
         Node(
             package='px4_swarm_control',
             executable='ground_station_node',
+            parameters=[ground_station_parameters],
             output='screen',
         ),
     )

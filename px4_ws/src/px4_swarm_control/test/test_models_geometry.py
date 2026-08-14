@@ -69,60 +69,79 @@ def test_default_vehicle_configs_preserve_leader_left_right_assignments():
 
 
 def test_vee_and_line_abreast_offsets_keep_left_right_signs():
-    geometry = FormationGeometry(lateral_spacing_m=4.0, trail_spacing_m=3.0)
+    geometry = FormationGeometry(
+        vee_lateral_spacing_m=0.4,
+        vee_trail_spacing_m=0.6928,
+        line_abreast_lateral_spacing_m=0.8,
+    )
 
     assert formation_body_offset(FormationMode.VEE, Slot.FOLLOWER_LEFT, geometry) == (
-        -3.0,
-        4.0,
+        -0.6928,
+        0.4,
         0.0,
     )
     assert formation_body_offset(FormationMode.VEE, Slot.FOLLOWER_RIGHT, geometry) == (
-        -3.0,
-        -4.0,
+        -0.6928,
+        -0.4,
         0.0,
     )
     assert formation_body_offset(
         FormationMode.LINE_ABREAST,
         Slot.FOLLOWER_LEFT,
         geometry,
-    ) == (0.0, 4.0, 0.0)
+    ) == (0.0, 0.8, 0.0)
     assert formation_body_offset(
         FormationMode.LINE_ABREAST,
         Slot.FOLLOWER_RIGHT,
         geometry,
-    ) == (0.0, -4.0, 0.0)
+    ) == (0.0, -0.8, 0.0)
 
 
 def test_staging_positions_use_leader_initial_yaw_and_keep_left_slot_left():
     leader = PositionYawSetpoint(x=10.0, y=20.0, z=-5.0, yaw=pi / 2.0)
-    geometry = FormationGeometry(lateral_spacing_m=4.0, trail_spacing_m=3.0)
+    geometry = FormationGeometry(
+        vee_lateral_spacing_m=0.4,
+        vee_trail_spacing_m=0.6928,
+        line_abreast_lateral_spacing_m=0.8,
+    )
 
     left = staging_setpoint(leader, Slot.FOLLOWER_LEFT, geometry)
     right = staging_setpoint(leader, Slot.FOLLOWER_RIGHT, geometry)
 
-    assert_setpoint_close(left, PositionYawSetpoint(x=6.0, y=17.0, z=-5.0, yaw=pi / 2.0))
+    assert_setpoint_close(
+        left,
+        PositionYawSetpoint(x=9.6, y=19.3072, z=-5.0, yaw=pi / 2.0),
+    )
     assert_setpoint_close(
         right,
-        PositionYawSetpoint(x=14.0, y=17.0, z=-5.0, yaw=pi / 2.0),
+        PositionYawSetpoint(x=10.4, y=19.3072, z=-5.0, yaw=pi / 2.0),
     )
 
 
 def test_body_frame_following_rotates_with_current_leader_yaw():
     leader = PositionYawSetpoint(x=10.0, y=20.0, z=-5.0, yaw=-pi / 2.0)
-    geometry = FormationGeometry(lateral_spacing_m=4.0, trail_spacing_m=3.0)
+    geometry = FormationGeometry(
+        vee_lateral_spacing_m=0.4,
+        vee_trail_spacing_m=0.6928,
+        line_abreast_lateral_spacing_m=0.8,
+    )
 
     left_offset = formation_body_offset(FormationMode.VEE, Slot.FOLLOWER_LEFT, geometry)
     left_world = body_offset_to_world(leader, left_offset)
 
     assert_setpoint_close(
         left_world,
-        PositionYawSetpoint(x=14.0, y=23.0, z=-5.0, yaw=-pi / 2.0),
+        PositionYawSetpoint(x=10.4, y=20.6928, z=-5.0, yaw=-pi / 2.0),
     )
 
 
 def test_leader_slot_is_centered_for_staging_and_formations():
     leader = PositionYawSetpoint(x=1.0, y=2.0, z=-3.0, yaw=0.4)
-    geometry = FormationGeometry(lateral_spacing_m=4.0, trail_spacing_m=3.0)
+    geometry = FormationGeometry(
+        vee_lateral_spacing_m=0.4,
+        vee_trail_spacing_m=0.6928,
+        line_abreast_lateral_spacing_m=0.8,
+    )
 
     assert formation_body_offset(FormationMode.VEE, Slot.LEADER, geometry) == (0.0, 0.0, 0.0)
     assert_setpoint_close(staging_setpoint(leader, Slot.LEADER, geometry), leader)

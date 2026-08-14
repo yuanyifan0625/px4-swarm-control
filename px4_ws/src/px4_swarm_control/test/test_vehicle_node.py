@@ -254,7 +254,9 @@ def test_follower_left_derives_vee_setpoint_from_fresh_leader_status():
     core.control_tick()
 
     assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
-    assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 24.0, -5.0, 0.0)]
+    assert px4_interface.setpoints == [
+        PositionYawSetpoint(9.3072, 20.4, -5.0, 0.0),
+    ]
 
 
 def test_follower_right_derives_vee_setpoint_from_fresh_leader_status():
@@ -268,7 +270,9 @@ def test_follower_right_derives_vee_setpoint_from_fresh_leader_status():
     core.control_tick()
 
     assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
-    assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 16.0, -5.0, 0.0)]
+    assert px4_interface.setpoints == [
+        PositionYawSetpoint(9.3072, 19.6, -5.0, 0.0),
+    ]
 
 
 def test_follower_uses_current_formation_mode_topic_for_local_offset():
@@ -284,7 +288,9 @@ def test_follower_uses_current_formation_mode_topic_for_local_offset():
     core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
     core.control_tick()
 
-    assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 24.0, -5.0, 0.0)]
+    assert px4_interface.setpoints == [
+        PositionYawSetpoint(9.3072, 20.4, -5.0, 0.0),
+    ]
 
 
 def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
@@ -300,7 +306,9 @@ def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
     core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
     core.control_tick()
 
-    assert px4_interface.setpoints == [PositionYawSetpoint(10.0, 24.0, -5.0, 0.0)]
+    assert px4_interface.setpoints == [
+        PositionYawSetpoint(10.0, 20.8, -5.0, 0.0),
+    ]
 
 
 def test_follower_holds_when_leader_status_is_stale():
@@ -419,7 +427,9 @@ def test_follower_pause_resume_waits_for_fresh_following_leader_before_following
     core.control_tick()
 
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
-    assert px4_interface.setpoints == [PositionYawSetpoint(7.0, 24.0, -5.0, 0.0)]
+    assert px4_interface.setpoints == [
+        PositionYawSetpoint(9.3072, 20.4, -5.0, 0.0),
+    ]
     assert px4_interface.safe_hover_calls >= 1
 
 

@@ -201,6 +201,18 @@ def test_relative_leader_jog_commands_convert_from_current_status_to_absolute_go
     assert isclose(move_calls[3][4], pi / 4.0)
 
 
+def test_operator_console_defaults_use_small_field_operation_profile():
+    config = OperatorConsoleConfig()
+
+    assert config.takeoff_altitude_m == 1.5
+    assert config.move_step_x_m == 1.0
+    assert config.move_step_y_m == 1.0
+    assert config.yaw_step_rad == pi / 6.0
+    assert config.settle_vee_lateral_spacing_m == 0.4
+    assert config.settle_vee_trail_spacing_m == 0.6928
+    assert config.settle_line_abreast_lateral_spacing_m == 0.8
+
+
 def test_paused_console_allows_status_resume_and_land_but_blocks_motion_and_macro():
     gateway = FakeGateway(leader_status=leader_status(), paused=True)
     dispatcher = ConsoleCommandDispatcher(OperatorConsoleConfig(), gateway)
@@ -245,7 +257,7 @@ def test_demo_macro_runs_settle_steps_and_tracks_successful_formation_mode():
 
     assert result.success is True
     assert gateway.calls == [
-        ('takeoff', 5.0, 60.0),
+        ('takeoff', 1.5, 60.0),
         ('change_formation', 'line_abreast', 60.0),
         ('settle', 'line_abreast', 1.0, 30.0, 0.5, 0.25),
         ('change_formation', 'vee', 60.0),
@@ -287,16 +299,16 @@ def test_demo_macro_home_yaw_rotates_current_leader_pose_to_home_yaw_before_home
 
     assert result.success is True
     move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
-    assert move_calls[0][1:5] == (4.0, 2.0, -5.0, 0.0)
-    assert move_calls[1][1:4] == (4.0, 2.0, -5.0)
-    assert isclose(move_calls[1][4], pi / 3.0)
-    assert move_calls[2][1:5] == (4.0, 2.0, -5.0, 0.0)
+    assert move_calls[0][1:5] == (2.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:4] == (2.0, 2.0, -5.0)
+    assert isclose(move_calls[1][4], pi / 6.0)
+    assert move_calls[2][1:5] == (2.0, 2.0, -5.0, 0.0)
     assert move_calls[3][1:5] == (1.0, 2.0, -5.0, 0.0)
     assert gateway.calls == [
-        ('takeoff', 5.0, 60.0),
-        ('move_leader', 4.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
-        ('move_leader', 4.0, 2.0, -5.0, pi / 3.0, 0.3, 0.2, 60.0),
-        ('move_leader', 4.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('takeoff', 1.5, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, pi / 6.0, 0.3, 0.2, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
         ('move_leader', 1.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
@@ -319,7 +331,7 @@ def test_demo_macro_stops_when_settle_times_out():
     assert result.success is False
     assert 'formation settle timed out' in result.message
     assert gateway.calls == [
-        ('takeoff', 5.0, 60.0),
+        ('takeoff', 1.5, 60.0),
         ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
     ]
 
@@ -336,8 +348,8 @@ def test_demo_macro_stops_on_first_failed_action():
     assert result.success is False
     assert 'move failed' in result.message
     assert gateway.calls == [
-        ('takeoff', 5.0, 60.0),
-        ('move_leader', 3.0, 0.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('takeoff', 1.5, 60.0),
+        ('move_leader', 1.0, 0.0, -5.0, 0.0, 0.3, 0.2, 60.0),
     ]
 
 
@@ -355,25 +367,25 @@ def test_unknown_command_returns_helpful_failure_without_calling_actions():
 def test_formation_settle_ready_uses_leader_state_and_fixed_follower_slots():
     statuses = {
         1: leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
-        2: follower_status(2, 'follower_left', x=7.0, y=24.0),
-        3: follower_status(3, 'follower_right', x=7.0, y=16.0),
+        2: follower_status(2, 'follower_left', x=9.3072, y=20.4),
+        3: follower_status(3, 'follower_right', x=9.3072, y=19.6),
     }
 
     assert formation_settle_ready(statuses, 'vee', OperatorConsoleConfig()) is True
 
 
 def test_formation_settle_ready_rejects_stale_or_misaligned_followers():
-    stale_right = follower_status(3, 'follower_right', x=7.0, y=16.0)
+    stale_right = follower_status(3, 'follower_right', x=9.3072, y=19.6)
     stale_right.last_telemetry_age_sec = 2.0
     statuses = {
         1: leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
-        2: follower_status(2, 'follower_left', x=7.0, y=24.0),
+        2: follower_status(2, 'follower_left', x=9.3072, y=20.4),
         3: stale_right,
     }
 
     assert formation_settle_ready(statuses, 'vee', OperatorConsoleConfig()) is False
 
-    statuses[3] = follower_status(3, 'follower_right', x=7.0, y=20.0)
+    statuses[3] = follower_status(3, 'follower_right', x=9.3072, y=20.2)
 
     assert formation_settle_ready(statuses, 'vee', OperatorConsoleConfig()) is False
 
@@ -388,8 +400,8 @@ def test_formation_settle_gate_requires_continuous_stable_window():
     gate = FormationSettleGate(config, now_s=now_s)
     ready_statuses = {
         1: leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
-        2: follower_status(2, 'follower_left', x=7.0, y=24.0),
-        3: follower_status(3, 'follower_right', x=7.0, y=16.0),
+        2: follower_status(2, 'follower_left', x=9.3072, y=20.4),
+        3: follower_status(3, 'follower_right', x=9.3072, y=19.6),
     }
 
     assert gate.update(ready_statuses, 'vee') is False
@@ -401,7 +413,7 @@ def test_formation_settle_gate_requires_continuous_stable_window():
     now = 1.2
     disturbed_statuses = {
         **ready_statuses,
-        3: follower_status(3, 'follower_right', x=7.0, y=20.0),
+        3: follower_status(3, 'follower_right', x=9.3072, y=20.2),
     }
     assert gate.update(disturbed_statuses, 'vee') is False
     now = 2.3

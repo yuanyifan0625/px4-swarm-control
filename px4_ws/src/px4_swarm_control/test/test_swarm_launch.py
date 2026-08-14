@@ -9,12 +9,16 @@ def private_node_field(node, field_name):
     return getattr(node, f'_Node__{field_name}')
 
 
-def load_swarm_launch_module():
-    launch_path = Path(__file__).parents[1] / 'launch' / 'swarm_nodes.launch.py'
+def load_launch_module(file_name):
+    launch_path = Path(__file__).parents[1] / 'launch' / file_name
     spec = spec_from_file_location('swarm_nodes_launch', launch_path)
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def load_swarm_launch_module():
+    return load_launch_module('swarm_nodes.launch.py')
 
 
 def plain_node_parameters(node):
@@ -88,3 +92,44 @@ def test_swarm_launch_uses_three_vehicle_yaml_as_parameter_source():
     assert [
         plain_node_parameters(node)['px4_target_system'] for node in vehicle_nodes
     ] == [2, 3, 4]
+
+
+def test_real_vehicle_launches_start_one_vehicle_node_each():
+    cases = (
+        ('real_mav1_vehicle.launch.py', '/MAV1', 'MAV1', 'leader'),
+        ('real_mav2_vehicle.launch.py', '/MAV2', 'MAV2', 'follower_left'),
+        ('real_mav3_vehicle.launch.py', '/MAV3', 'MAV3', 'follower_right'),
+    )
+
+    for file_name, namespace, vehicle_id, slot in cases:
+        module = load_launch_module(file_name)
+        launch_description = module.generate_launch_description()
+        nodes = [
+            entity for entity in launch_description.entities
+            if isinstance(entity, Node)
+        ]
+
+        assert [(node.node_package, node.node_executable) for node in nodes] == [
+            ('px4_swarm_control', 'vehicle_node'),
+        ]
+        assert private_node_field(nodes[0], 'node_namespace') == namespace
+        parameters = plain_node_parameters(nodes[0])
+        assert parameters['vehicle_id'] == vehicle_id
+        assert parameters['px4_namespace'] == namespace
+        assert parameters['slot'] == slot
+
+
+def test_real_ground_station_launch_starts_only_ground_station_node():
+    module = load_launch_module('real_ground_station.launch.py')
+
+    launch_description = module.generate_launch_description()
+    nodes = [
+        entity for entity in launch_description.entities
+        if isinstance(entity, Node)
+    ]
+
+    assert [(node.node_package, node.node_executable) for node in nodes] == [
+        ('px4_swarm_control', 'ground_station_node'),
+    ]
+    assert private_node_field(nodes[0], 'node_namespace') is None
+    assert 'formation_line_abreast_lateral_spacing_m' in plain_node_parameters(nodes[0])

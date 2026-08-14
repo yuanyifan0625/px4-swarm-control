@@ -1,12 +1,12 @@
 # Operator console defaults for first-version manual SITL control.
 operator_console:
   ros__parameters:
-    takeoff_altitude_m: 5.0
+    takeoff_altitude_m: 1.5
     default_timeout_sec: 60.0
-    move_step_x_m: 3.0
-    move_step_y_m: 3.0
+    move_step_x_m: 1.0
+    move_step_y_m: 1.0
     altitude_step_m: 1.0
-    yaw_step_deg: 60.0
+    yaw_step_deg: 30.0
     move_position_tolerance_m: 0.3
     move_yaw_tolerance_rad: 0.2
     status_wait_timeout_s: 2.0
@@ -15,8 +15,9 @@ operator_console:
     settle_position_tolerance_m: 0.5
     settle_yaw_tolerance_rad: 0.25
     settle_telemetry_timeout_s: 1.0
-    settle_lateral_spacing_m: 4.0
-    settle_trail_spacing_m: 3.0
+    settle_vee_lateral_spacing_m: 0.4
+    settle_vee_trail_spacing_m: 0.6928
+    settle_line_abreast_lateral_spacing_m: 0.8
     demo_commands:
       - "1"
       - "2"
