@@ -1,6 +1,7 @@
 """Public scaffold metadata for package-level tests."""
 
 EXPECTED_ACTIONS = (
+    "ArmSwarm",
     "TakeoffSwarm",
     "MoveLeader",
     "ChangeFormation",

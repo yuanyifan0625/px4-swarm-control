@@ -93,11 +93,11 @@ docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/px4_ws &&
 Terminal vehicle/ground station 請依 ticket 11b 文件啟動三個 `vehicle_node` 和 `ground_station_node`。然後執行：
 
 ```bash
-docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/px4_ws && source /opt/ros/jazzy/setup.bash && source install/setup.bash && ros2 run px4_swarm_control operator_console --command 9 --ros-args --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml"
+docker compose exec ros2_jazzy bash -lc "cd /home/ncrl/docker_ubuntu24/px4_ws && source /opt/ros/jazzy/setup.bash && source install/setup.bash && ros2 run px4_swarm_control operator_console --command 9"
 ```
 
 通過條件：
 
-- Gazebo 看到三台飛機起飛、leader 移動、yaw 轉向、vee/line_abreast 切換、回到 home、最後降落。
+- Gazebo 看到三台飛機起飛、leader 移動、yaw 轉向、vee/line_abreast 切換、先轉回 home yaw、回到 home、最後降落。
 - `/MAV1/status`、`/MAV2/status`、`/MAV3/status` 最後都顯示 `vehicle_state: landed`、`armed: false`。
 - `operator_console` demo 沒有直接發布 follower absolute target；followers 仍只靠 leader status 與 formation mode 計算 setpoint。

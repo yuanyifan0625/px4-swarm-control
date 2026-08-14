@@ -1,0 +1,9 @@
+# Arm-only mission command. This intentionally does not request takeoff.
+float32 timeout_sec
+---
+bool success
+string message
+---
+string current_state
+uint8 vehicles_armed
+uint8 total_vehicles

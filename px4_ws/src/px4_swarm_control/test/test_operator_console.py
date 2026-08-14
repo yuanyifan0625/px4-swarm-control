@@ -33,6 +33,10 @@ class FakeGateway(SwarmActionGateway):
         self.calls.append(('takeoff', altitude_m, timeout_sec))
         return self.action_results.get('takeoff', ConsoleActionResult(True, 'takeoff ok'))
 
+    def arm(self, timeout_sec):
+        self.calls.append(('arm', timeout_sec))
+        return self.action_results.get('arm', ConsoleActionResult(True, 'arm ok'))
+
     def move_leader(
         self,
         x,
@@ -132,12 +136,14 @@ def test_numeric_commands_call_existing_swarm_actions_with_configured_defaults()
     dispatcher = ConsoleCommandDispatcher(config, gateway)
 
     assert dispatcher.dispatch('1').success is True
+    assert dispatcher.dispatch('0').success is True
     assert dispatcher.dispatch('6').success is True
     assert dispatcher.dispatch('7').success is True
     assert dispatcher.dispatch('8').success is True
 
     assert gateway.calls == [
         ('takeoff', 6.0, 70.0),
+        ('arm', 70.0),
         ('change_formation', 'vee', 70.0),
         ('change_formation', 'line_abreast', 70.0),
         ('land', 70.0),
@@ -205,11 +211,13 @@ def test_paused_console_allows_status_resume_and_land_but_blocks_motion_and_macr
     assert dispatcher.dispatch('8').success is True
     assert dispatcher.dispatch('2').success is False
     assert dispatcher.dispatch('6').success is False
+    assert dispatcher.dispatch('0').success is False
     assert dispatcher.dispatch('9').success is False
 
     assert ('pause', False, 'operator console resume') in gateway.calls
     assert ('land', 60.0) in gateway.calls
     assert all(call[0] != 'move_leader' for call in gateway.calls)
+    assert all(call[0] != 'arm' for call in gateway.calls)
 
 
 def test_settle_command_observes_current_formation_without_moving_followers():
@@ -241,6 +249,56 @@ def test_demo_macro_runs_settle_steps_and_tracks_successful_formation_mode():
         ('change_formation', 'line_abreast', 60.0),
         ('settle', 'line_abreast', 1.0, 30.0, 0.5, 0.25),
         ('change_formation', 'vee', 60.0),
+        ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
+        ('land', 60.0),
+    ]
+
+
+def test_demo_macro_home_yaw_rotates_current_leader_pose_to_home_yaw_before_home():
+    config = OperatorConsoleConfig(
+        demo_commands=('1', '2', '5', 'home_yaw', 'settle', 'home', 'settle', '8')
+    )
+    gateway = FakeGateway(leader_status=leader_status(x=0.0, y=0.0, z=-5.0, yaw=0.0))
+    dispatcher = ConsoleCommandDispatcher(config, gateway)
+
+    def move_leader(x, y, z, yaw, position_tolerance_m, yaw_tolerance_rad, timeout_sec):
+        FakeGateway.move_leader(
+            gateway,
+            x,
+            y,
+            z,
+            yaw,
+            position_tolerance_m,
+            yaw_tolerance_rad,
+            timeout_sec,
+        )
+        gateway.leader_status = leader_status(x=x, y=y, z=z, yaw=yaw)
+        return ConsoleActionResult(True, 'move ok')
+
+    def takeoff(altitude_m, timeout_sec):
+        gateway.calls.append(('takeoff', altitude_m, timeout_sec))
+        gateway.leader_status = leader_status(x=1.0, y=2.0, z=-5.0, yaw=0.0)
+        return ConsoleActionResult(True, 'takeoff ok')
+
+    gateway.takeoff = takeoff
+    gateway.move_leader = move_leader
+
+    result = dispatcher.dispatch('9')
+
+    assert result.success is True
+    move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
+    assert move_calls[0][1:5] == (4.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:4] == (4.0, 2.0, -5.0)
+    assert isclose(move_calls[1][4], pi / 3.0)
+    assert move_calls[2][1:5] == (4.0, 2.0, -5.0, 0.0)
+    assert move_calls[3][1:5] == (1.0, 2.0, -5.0, 0.0)
+    assert gateway.calls == [
+        ('takeoff', 5.0, 60.0),
+        ('move_leader', 4.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('move_leader', 4.0, 2.0, -5.0, pi / 3.0, 0.3, 0.2, 60.0),
+        ('move_leader', 4.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
+        ('move_leader', 1.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('settle', 'vee', 1.0, 30.0, 0.5, 0.25),
         ('land', 60.0),
     ]

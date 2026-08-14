@@ -9,6 +9,7 @@ from px4_swarm_control.ground_station_node import (
 )
 from px4_swarm_control.models import MissionState
 from px4_swarm_interfaces.action import (
+    ArmSwarm,
     ChangeFormation,
     LandSwarm,
     MoveLeader,
@@ -95,6 +96,67 @@ def test_takeoff_action_starts_mission_without_reporting_success_before_staging(
     assert (left.x, left.y, left.z, left.yaw) == (-3.0, 4.0, -5.0, 0.0)
     assert (right.x, right.y, right.z, right.yaw) == (-3.0, -4.0, -5.0, 0.0)
     assert logger.infos[-1].startswith('swarm mission idle -> taking_off')
+
+
+def test_arm_action_publishes_arm_command_without_staging_or_takeoff():
+    core, publishers, _ = make_core()
+    request = ArmSwarm.Goal()
+    request.timeout_sec = 12.0
+
+    feedback = core.start_arm(request)
+
+    assert feedback.current_state == 'arming'
+    assert feedback.vehicles_armed == 0
+    assert feedback.total_vehicles == 3
+    assert core.arm_result() is None
+    assert publishers.mission_command.messages[-1].command == MissionCommand.ARM
+    assert publishers.vehicle_setpoints[1].messages == []
+    assert publishers.vehicle_setpoints[2].messages == []
+    assert publishers.vehicle_setpoints[3].messages == []
+
+
+def test_arm_action_rejects_while_paused_without_leaving_pause():
+    core, publishers, _ = make_core()
+    pause = PauseSwarm.Goal()
+    pause.pause = True
+    core.handle_pause(pause)
+    request = ArmSwarm.Goal()
+    request.timeout_sec = 12.0
+
+    feedback = core.start_arm(request)
+    result = core.arm_result()
+
+    assert feedback.current_state == 'paused'
+    assert result.success is False
+    assert 'paused' in result.message
+    assert core.mission_state is MissionState.PAUSED
+    assert len(publishers.mission_command.messages) == 1
+    assert publishers.mission_command.messages[-1].command == MissionCommand.PAUSE
+
+
+def test_arm_action_succeeds_after_three_fresh_armed_statuses_while_landed():
+    core, _, _ = make_core()
+    request = ArmSwarm.Goal()
+    request.timeout_sec = 12.0
+    core.start_arm(request)
+
+    core.handle_vehicle_status(
+        vehicle_status(1, armed=True, nav_state='auto_loiter', vehicle_state='landed')
+    )
+    core.handle_vehicle_status(
+        vehicle_status(2, armed=True, nav_state='auto_loiter', vehicle_state='landed')
+    )
+
+    assert core.arm_result() is None
+    assert core.arm_feedback().vehicles_armed == 2
+
+    core.handle_vehicle_status(
+        vehicle_status(3, armed=True, nav_state='auto_loiter', vehicle_state='landed')
+    )
+
+    result = core.arm_result()
+    assert result.success is True
+    assert result.message == 'all vehicles reported armed'
 
 
 def test_takeoff_action_result_succeeds_only_after_current_staging_completion():
@@ -955,6 +1017,7 @@ def test_ground_station_node_starts_under_swarm_namespace_with_actions(monkeypat
     try:
         assert node.get_namespace() == '/swarm'
         assert [server.name for server in action_servers] == [
+            'arm',
             'takeoff',
             'move_leader',
             'change_formation',

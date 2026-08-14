@@ -23,6 +23,7 @@ from px4_swarm_control.models import MissionState
 from px4_swarm_control.models import PositionYawSetpoint
 from px4_swarm_control.models import VehicleLevelState
 from px4_swarm_interfaces.action import (
+    ArmSwarm,
     ChangeFormation,
     LandSwarm,
     MoveLeader,
@@ -106,6 +107,9 @@ class GroundStationCore:
         self._takeoff_timeout_s: float | None = None
         self._takeoff_reason: str | None = None
         self._takeoff_rejection: str | None = None
+        self._arm_started_s: float | None = None
+        self._arm_timeout_s: float | None = None
+        self._arm_rejection: str | None = None
         self._leader_goal: PositionYawSetpoint | None = None
         self._leader_goal_message: LeaderGoal | None = None
         self._move_leader_started_s: float | None = None
@@ -121,6 +125,49 @@ class GroundStationCore:
         self._formation_established_logged = False
         self._land_started_s: float | None = None
         self._land_timeout_s: float | None = None
+
+    def start_arm(self, request: ArmSwarm.Goal):
+        if self.mission_state is MissionState.PAUSED:
+            self._arm_rejection = 'ArmSwarm rejected while swarm is paused'
+            return self.arm_feedback()
+        self.vehicle_statuses = {}
+        self._clear_move_leader_state()
+        self._clear_change_formation_state()
+        self._arm_started_s = self.now_s()
+        self._arm_timeout_s = max(float(request.timeout_sec), 0.0)
+        self._arm_rejection = None
+        self._transition_to(MissionState.ARMING, 'arm-only action accepted')
+        self.publishers.mission_command.publish(
+            self._mission_command(
+                MissionCommand.ARM,
+                f'timeout_sec={request.timeout_sec:.2f}',
+            ),
+        )
+        return self.arm_feedback()
+
+    def arm_feedback(self) -> ArmSwarm.Feedback:
+        feedback = ArmSwarm.Feedback()
+        feedback.current_state = self.mission_state.value
+        feedback.vehicles_armed = self._count_armed_vehicles()
+        feedback.total_vehicles = self.config.total_vehicles
+        return feedback
+
+    def arm_result(self) -> ArmSwarm.Result | None:
+        result = ArmSwarm.Result()
+        if self._arm_rejection is not None:
+            result.success = False
+            result.message = self._arm_rejection
+            return result
+        if self._all_vehicles_armed():
+            result.success = True
+            result.message = 'all vehicles reported armed'
+            return result
+        if self._arm_timed_out():
+            self._transition_to(MissionState.ERROR, 'arm-only timed out')
+            result.success = False
+            result.message = 'arm-only timed out'
+            return result
+        return None
 
     def start_takeoff(self, request: TakeoffSwarm.Goal):
         if self.mission_state is MissionState.PAUSED:
@@ -349,6 +396,9 @@ class GroundStationCore:
         self._takeoff_started_s = None
         self._takeoff_timeout_s = None
         self._takeoff_reason = None
+        self._arm_started_s = None
+        self._arm_timeout_s = None
+        self._arm_rejection = None
         self._transition_to(MissionState.LANDING, 'land-all action accepted')
         self.publishers.mission_command.publish(
             self._mission_command(
@@ -494,6 +544,14 @@ class GroundStationCore:
         return all(_landed_ready(status, self.config.telemetry_fresh_timeout_s)
                    for status in self.vehicle_statuses.values())
 
+    def _all_vehicles_armed(self) -> bool:
+        if len(self.vehicle_statuses) < self.config.total_vehicles:
+            return False
+        return all(
+            _armed_ready(status, self.config.telemetry_fresh_timeout_s)
+            for status in self.vehicle_statuses.values()
+        )
+
     def _count_staged_vehicles(self) -> int:
         return sum(
             1
@@ -512,6 +570,20 @@ class GroundStationCore:
             1
             for status in self.vehicle_statuses.values()
             if status.vehicle_state == VehicleLevelState.LANDED.value
+        )
+
+    def _count_armed_vehicles(self) -> int:
+        return sum(
+            1
+            for status in self.vehicle_statuses.values()
+            if _armed_ready(status, self.config.telemetry_fresh_timeout_s)
+        )
+
+    def _arm_timed_out(self) -> bool:
+        return (
+            self._arm_started_s is not None
+            and self._arm_timeout_s is not None
+            and self.now_s() - self._arm_started_s > self._arm_timeout_s
         )
 
     def _takeoff_timed_out(self) -> bool:
@@ -734,6 +806,13 @@ class GroundStationNode(Node):
         self.action_servers = (
             ActionServer(
                 self,
+                ArmSwarm,
+                'arm',
+                self._execute_arm,
+                callback_group=self.callback_group,
+            ),
+            ActionServer(
+                self,
                 TakeoffSwarm,
                 'takeoff',
                 self._execute_takeoff,
@@ -768,6 +847,25 @@ class GroundStationNode(Node):
                 callback_group=self.callback_group,
             ),
         )
+
+    def _execute_arm(self, goal_handle):
+        self.core.start_arm(goal_handle.request)
+        while rclpy.ok():
+            goal_handle.publish_feedback(self.core.arm_feedback())
+            result = self.core.arm_result()
+            if result is not None:
+                if result.success:
+                    goal_handle.succeed()
+                else:
+                    goal_handle.abort()
+                return result
+            sleep(0.1)
+
+        result = ArmSwarm.Result()
+        result.success = False
+        result.message = 'ROS shutdown before arm-only completed'
+        goal_handle.abort()
+        return result
 
     def _execute_takeoff(self, goal_handle):
         self.core.start_takeoff(goal_handle.request)
@@ -946,6 +1044,14 @@ def _landed_ready(status: VehicleStatus, telemetry_fresh_timeout_s: float) -> bo
     # landed completion 也要求新 telemetry，保護上一輪 landed cache 不完成本輪降落 action。
     return (
         status.vehicle_state == VehicleLevelState.LANDED.value
+        and isfinite(status.last_telemetry_age_sec)
+        and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
+    )
+
+
+def _armed_ready(status: VehicleStatus, telemetry_fresh_timeout_s: float) -> bool:
+    return (
+        status.armed
         and isfinite(status.last_telemetry_age_sec)
         and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
     )

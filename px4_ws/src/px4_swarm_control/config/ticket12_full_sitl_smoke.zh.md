@@ -182,7 +182,7 @@ ros2 launch px4_swarm_control swarm_nodes.launch.py
 通過條件：
 
 - `/MAV1/status`、`/MAV2/status`、`/MAV3/status` 逐步出現。
-- `/swarm/takeoff`、`/swarm/move_leader`、`/swarm/change_formation`、`/swarm/pause`、`/swarm/land` actions 存在。
+- `/swarm/arm`、`/swarm/takeoff`、`/swarm/move_leader`、`/swarm/change_formation`、`/swarm/pause`、`/swarm/land` actions 存在。
 - launch terminal 沒有啟動 PX4 SITL、Gazebo、Micro XRCE-DDS Agent、QGC、`operator_console` 或 `px4_speed_profile`。
 
 可用另一個 terminal 確認：
@@ -205,24 +205,26 @@ Terminal console：
 cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-ros2 run px4_swarm_control operator_console --command 9 --ros-args --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml
+ros2 run px4_swarm_control operator_console --command 9
 ```
 
 通過條件：
 
 - console 最後輸出 `OK: demo macro completed`。
 - ground station 曾回報或 action message 顯示 `all vehicles reached staging positions`。
-- Gazebo 看到三台起飛到 staging、leader 移動、yaw 轉向、`vee` / `line_abreast` 切換、回 home、最後降落。
+- Gazebo 看到三台起飛到 staging、leader 移動、yaw 轉向、`vee` / `line_abreast` 切換、先轉回 home yaw、回 home、最後降落。
 - followers 的移動來自各自 `vehicle_node` 根據 `/MAV1/status` 和 `/swarm/formation_mode` 計算，不是 operator 或 ground station 持續發布 follower absolute target。
 
-如果你想手動進互動模式，使用同一個 params-file，看到 prompt 後輸入 `9`：
+如果你想手動進互動模式，看到 prompt 後輸入 `9`：
 
 ```bash
 cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-ros2 run px4_swarm_control operator_console --ros-args --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml
+ros2 run px4_swarm_control operator_console
 ```
+
+`operator_console.yaml` 仍可用作選擇性 override；預設值已和這份 YAML 對齊，正常 demo 不需要加 `--ros-args --params-file`。
 
 ## 10. 確認最後 landed 狀態
 

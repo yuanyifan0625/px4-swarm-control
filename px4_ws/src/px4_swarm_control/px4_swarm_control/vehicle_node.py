@@ -132,6 +132,10 @@ class VehicleNodeCore:
             self._start_takeoff_without_qgc()
 
     def handle_mission_command(self, msg: MissionCommand) -> None:
+        if msg.command == MissionCommand.ARM:
+            self.px4_interface.arm()
+            self.transition_to(VehicleLevelState.ARMING, 'arm command accepted')
+            return
         if msg.command == MissionCommand.TAKEOFF:
             self._start_takeoff_without_qgc()
             return

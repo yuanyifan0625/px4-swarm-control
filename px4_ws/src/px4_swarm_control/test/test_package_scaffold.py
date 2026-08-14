@@ -21,6 +21,7 @@ def read_full_sitl_smoke_doc() -> str:
 def test_package_exposes_initial_contract_names():
     assert __version__ == "0.1.0"
     assert EXPECTED_ACTIONS == (
+        "ArmSwarm",
         "TakeoffSwarm",
         "MoveLeader",
         "ChangeFormation",
@@ -78,6 +79,8 @@ def test_full_sitl_smoke_doc_describes_external_runtime_launch_and_console():
     assert 'px4_speed_profile print-check-commands --profile slow_demo' in text
     assert 'px4_speed_profile apply --profile slow_demo --yes' in text
     assert 'operator_console --command 9' in text
+    assert 'operator_console --command 9 --ros-args --params-file' not in text
+    assert '/swarm/arm' in text
     assert '/MAV1/status' in text
     assert '/MAV2/status' in text
     assert '/MAV3/status' in text

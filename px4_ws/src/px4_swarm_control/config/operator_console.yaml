@@ -27,6 +27,8 @@ operator_console:
       - "settle"
       - "6"
       - "settle"
+      - "home_yaw"
+      - "settle"
       - "home"
       - "settle"
       - "8"

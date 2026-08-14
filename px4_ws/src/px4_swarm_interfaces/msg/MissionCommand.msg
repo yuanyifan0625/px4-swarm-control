@@ -1,3 +1,4 @@
+string ARM=arm
 string TAKEOFF=takeoff
 string LAND=land
 string PAUSE=pause

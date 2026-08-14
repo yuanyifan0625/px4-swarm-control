@@ -73,21 +73,20 @@ ros2 run px4_swarm_control check_live_px4_gz_bridge --agent-log /tmp/microxrceag
 cd /home/ncrl/docker_ubuntu24/px4_ws
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
-ros2 run px4_swarm_control operator_console --ros-args \
-  --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml
+ros2 run px4_swarm_control operator_console
 ```
 
 Console 會顯示短指令說明：
 
 ```text
 s=status, p=pause, r=resume, q=quit, h=help
-1=takeoff, 2=leader x+step, 3=leader y+step, 4=leader up step, 5=yaw+step
+0=arm, 1=takeoff, 2=leader x+step, 3=leader y+step, 4=leader up step, 5=yaw+step
 6=vee, 7=line_abreast, 8=land, 9=demo macro, settle=wait followers stable
 ```
 
 注意：PX4 local position 使用 NED 座標，所以 `4` 的「上升 1m」實際會讓 MoveLeader goal 的 `z` 減少 `1.0`。
 
-注意：`--params-file` 後面的路徑會依照目前終端機所在目錄解析。使用上面的絕對路徑，可以避免你人在 `PX4-Autopilot` 目錄時，ROS 2 找不到 `px4_ws/src/.../operator_console.yaml`。
+`operator_console.yaml` 仍可作為選擇性 override；目前 node 內建預設已和這份 YAML 對齊，正常互動或 demo 不需要額外載入 params-file。
 
 ## 3. 使用 console 起飛
 
@@ -179,19 +178,15 @@ r
 
 - Console 輸出 `OK: all vehicles reported landed`。
 - Gazebo 中三台降落。
-- 三台 `/vehicle_N/status` 最後都是 `vehicle_state: landed`、`armed: false`。
+- 三台 `/MAV1/status`、`/MAV2/status`、`/MAV3/status` 最後都是 `vehicle_state: landed`、`armed: false`。
 
 ## 9. Optional：one-shot command 模式
 
 如果只想測單一短指令，也可以不用進互動式 prompt：
 
 ```bash
-ros2 run px4_swarm_control operator_console --ros-args \
-  --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml \
-  -- --command s
-ros2 run px4_swarm_control operator_console --ros-args \
-  --params-file /home/ncrl/docker_ubuntu24/px4_ws/src/px4_swarm_control/config/operator_console.yaml \
-  -- --command 1
+ros2 run px4_swarm_control operator_console --command s
+ros2 run px4_swarm_control operator_console --command 1
 ```
 
 通過條件：每次只執行一個 console command 後退出；這只是手動 action 的短指令包裝，不會改變既有 action API。
@@ -207,13 +202,14 @@ ros2 run px4_swarm_control operator_console --ros-args \
 預設 macro：
 
 ```text
-1 -> 2 -> settle -> 5 -> settle -> 7 -> settle -> 6 -> settle -> home -> settle -> 8
+1 -> 2 -> settle -> 5 -> settle -> 7 -> settle -> 6 -> settle -> home_yaw -> settle -> home -> settle -> 8
 ```
 
 通過條件：
 
 - 任一步失敗時 macro 會停止，不會硬跑後續命令。
 - 若全部成功，console 輸出 `OK: demo macro completed`。
+- `home_yaw` 會先在目前 leader x/y/z 轉回 takeoff 完成後讀到的 home yaw。
 - `home` 會回到 takeoff 完成後讀到的 leader staging 位置。
 - 每個 `settle` 只觀察 `/MAV1/status`、`/MAV2/status`、`/MAV3/status` 和目前 console 記錄的 formation mode，不會發布 follower target。
 - Gazebo 中 followers 應在每個 leader move、yaw change 或 formation change 後穩定一下，才進入下一個 demo step。
@@ -234,9 +230,9 @@ timeout 3 ros2 topic echo --once /MAV3/staging_setpoint || true
 
 - QGC 全程不作為控制入口。
 - Console 可以從 container 內的 `px4_ws` 啟動。
-- Console 只呼叫既有 `/swarm/takeoff`、`/swarm/move_leader`、`/swarm/change_formation`、`/swarm/pause`、`/swarm/land`。
+- Console 只呼叫 `/swarm/arm`、`/swarm/takeoff`、`/swarm/move_leader`、`/swarm/change_formation`、`/swarm/pause`、`/swarm/land`。
 - Console 不發送 direct follower targets，也不繞過 `ground_station_node`。
 - `settle` 只作為 demo observation gate，不是新的 mission command，也不改 followers 的控制來源。
 - `2/3/4/5` 都先讀 leader status，再轉成 absolute `MoveLeader` goal。
-- Paused 狀態允許 `s/r/8`，阻擋 `2/3/4/5/6/7/9`。
+- Paused 狀態允許 `s/r/8`，阻擋 `0/2/3/4/5/6/7/9`。
 - 既有手動 `ros2 action send_goal` workflow 仍可用。

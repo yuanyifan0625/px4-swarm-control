@@ -10,6 +10,7 @@ find_package(builtin_interfaces REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "action/ArmSwarm.action"
   "action/ChangeFormation.action"
   "action/LandSwarm.action"
   "action/MoveLeader.action"

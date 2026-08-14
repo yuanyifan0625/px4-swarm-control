@@ -483,6 +483,23 @@ def test_vehicle_staging_setpoint_and_takeoff_command_warm_up_offboard_without_q
     )
 
 
+def test_arm_mission_command_only_arms_without_takeoff_or_staging_flow():
+    px4_interface = FakePx4Interface()
+    core = make_core(px4_interface=px4_interface)
+    mission = MissionCommand()
+    mission.command = MissionCommand.ARM
+
+    core.handle_mission_command(mission)
+
+    assert px4_interface.arm_calls == 1
+    assert px4_interface.takeoff_altitudes == []
+    assert px4_interface.offboard_mode_calls == 0
+    assert px4_interface.setpoints == []
+    assert core.vehicle_level_state is VehicleLevelState.ARMING
+    assert core._takeoff_to_staging_active is False
+    assert core._pending_takeoff_until_staging is False
+
+
 def test_takeoff_command_waits_until_staging_setpoint_has_arrived():
     px4_interface = FakePx4Interface()
     logger = FakeLogger()

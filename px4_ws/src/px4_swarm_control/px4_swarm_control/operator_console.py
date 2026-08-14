@@ -21,6 +21,7 @@ from px4_swarm_control.geometry import (
 )
 from px4_swarm_control.models import FormationMode, PositionYawSetpoint, Slot
 from px4_swarm_interfaces.action import (
+    ArmSwarm,
     ChangeFormation,
     LandSwarm,
     MoveLeader,
@@ -46,7 +47,7 @@ class OperatorConsoleConfig:
     default_timeout_sec: float = 60.0
     move_step_x_m: float = 3.0
     move_step_y_m: float = 3.0
-    altitude_step_m: float = 2.0
+    altitude_step_m: float = 1.0
     yaw_step_rad: float = pi / 3.0
     move_position_tolerance_m: float = 0.3
     move_yaw_tolerance_rad: float = 0.2
@@ -67,6 +68,8 @@ class OperatorConsoleConfig:
         '7',
         'settle',
         '6',
+        'settle',
+        'home_yaw',
         'settle',
         'home',
         'settle',
@@ -95,6 +98,9 @@ class SwarmActionGateway(Protocol):
 
     def takeoff(self, altitude_m: float, timeout_sec: float) -> ConsoleActionResult:
         """Call TakeoffSwarm."""
+
+    def arm(self, timeout_sec: float) -> ConsoleActionResult:
+        """Call ArmSwarm without requesting takeoff."""
 
     def move_leader(
         self,
@@ -140,6 +146,8 @@ class ConsoleCommandDispatcher:
             return self._gateway.pause(True, 'operator console pause')
         if command in {'r', 'resume'}:
             return self._gateway.pause(False, 'operator console resume')
+        if command == '0':
+            return self._run_arm_command()
         if command == '1':
             return self._gateway.takeoff(
                 self._config.takeoff_altitude_m,
@@ -158,6 +166,11 @@ class ConsoleCommandDispatcher:
         if command == '9':
             return self._run_demo_macro()
         return ConsoleActionResult(False, f'unknown command: {command}. Use h for help.')
+
+    def _run_arm_command(self) -> ConsoleActionResult:
+        if self._gateway.is_paused():
+            return ConsoleActionResult(False, 'arm command blocked while swarm is paused')
+        return self._gateway.arm(self._config.default_timeout_sec)
 
     def _run_motion_command(self, command: str) -> ConsoleActionResult:
         if self._gateway.is_paused():
@@ -221,6 +234,10 @@ class ConsoleCommandDispatcher:
                 if home is None:
                     return ConsoleActionResult(False, 'demo macro has no home status')
                 result = self._move_to_status(home)
+            elif command == 'home_yaw':
+                if home is None:
+                    return ConsoleActionResult(False, 'demo macro has no home status')
+                result = self._yaw_to_status(home)
             else:
                 result = self.dispatch(command)
                 if command == '1' and result.success:
@@ -243,6 +260,22 @@ class ConsoleCommandDispatcher:
             self._config.default_timeout_sec,
         )
 
+    def _yaw_to_status(self, status: VehicleStatus) -> ConsoleActionResult:
+        if self._gateway.is_paused():
+            return ConsoleActionResult(False, 'home yaw blocked while swarm is paused')
+        leader = self._gateway.get_leader_status()
+        if leader is None:
+            return ConsoleActionResult(False, 'leader status unavailable for home yaw')
+        return self._gateway.move_leader(
+            leader.x,
+            leader.y,
+            leader.z,
+            status.yaw,
+            self._config.move_position_tolerance_m,
+            self._config.move_yaw_tolerance_rad,
+            self._config.default_timeout_sec,
+        )
+
 
 class RosSwarmActionGateway:
     """ROS 2 adapter that talks to the existing `/swarm` action surface."""
@@ -251,6 +284,7 @@ class RosSwarmActionGateway:
         self._node = node
         self._config = config
         self._statuses: dict[int, VehicleStatus] = {}
+        self._arm_client = ActionClient(node, ArmSwarm, '/swarm/arm')
         self._takeoff_client = ActionClient(node, TakeoffSwarm, '/swarm/takeoff')
         self._move_client = ActionClient(node, MoveLeader, '/swarm/move_leader')
         self._formation_client = ActionClient(
@@ -315,6 +349,11 @@ class RosSwarmActionGateway:
         goal.altitude_m = float(altitude_m)
         goal.timeout_sec = float(timeout_sec)
         return self._call_action(self._takeoff_client, goal, '/swarm/takeoff')
+
+    def arm(self, timeout_sec: float) -> ConsoleActionResult:
+        goal = ArmSwarm.Goal()
+        goal.timeout_sec = float(timeout_sec)
+        return self._call_action(self._arm_client, goal, '/swarm/arm')
 
     def move_leader(
         self,
@@ -397,10 +436,10 @@ class OperatorConsoleNode(Node):
     def _declare_parameters(self) -> None:
         self.declare_parameter('takeoff_altitude_m', 5.0)
         self.declare_parameter('default_timeout_sec', 60.0)
-        self.declare_parameter('move_step_x_m', 1.0)
-        self.declare_parameter('move_step_y_m', 1.0)
+        self.declare_parameter('move_step_x_m', 3.0)
+        self.declare_parameter('move_step_y_m', 3.0)
         self.declare_parameter('altitude_step_m', 1.0)
-        self.declare_parameter('yaw_step_deg', 45.0)
+        self.declare_parameter('yaw_step_deg', 60.0)
         self.declare_parameter('move_position_tolerance_m', 0.3)
         self.declare_parameter('move_yaw_tolerance_rad', 0.2)
         self.declare_parameter('status_wait_timeout_s', 2.0)
@@ -422,6 +461,8 @@ class OperatorConsoleNode(Node):
                 '7',
                 'settle',
                 '6',
+                'settle',
+                'home_yaw',
                 'settle',
                 'home',
                 'settle',
@@ -511,6 +552,7 @@ def _help_text() -> str:
         '  r: resume\n'
         '  q: quit\n'
         '  h: help\n'
+        '  0: ArmSwarm without takeoff\n'
         '  1: TakeoffSwarm\n'
         '  2: move leader world x + step\n'
         '  3: move leader world y + step\n'
