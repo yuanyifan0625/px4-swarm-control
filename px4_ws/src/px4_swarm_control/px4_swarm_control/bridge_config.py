@@ -10,7 +10,7 @@ from px4_swarm_control.models import Slot, VehicleRole
 
 PX4_V118_OUT_TOPIC_SUFFIXES = (
     '/fmu/out/vehicle_local_position_v1',
-    '/fmu/out/vehicle_status_v4',
+    '/fmu/out/vehicle_status_v1',
     '/fmu/out/vehicle_command_ack_v1',
 )
 PX4_V118_LAND_DETECTED_TOPIC_SUFFIX = '/fmu/out/vehicle_land_detected'
