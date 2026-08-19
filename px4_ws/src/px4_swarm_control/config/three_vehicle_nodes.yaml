@@ -9,8 +9,8 @@ MAV1:
     control_loop_hz: 20.0
     status_loop_hz: 5.0
     telemetry_timeout_s: 0.5
-    following_vee_lateral_spacing_m: 0.4
-    following_vee_trail_spacing_m: 0.6928
+    following_vee_lateral_spacing_m: 0.8
+    following_vee_trail_spacing_m: 0.8
     following_line_abreast_lateral_spacing_m: 0.8
     hold_x: 0.0
     hold_y: 0.0
@@ -27,8 +27,8 @@ MAV2:
     control_loop_hz: 20.0
     status_loop_hz: 5.0
     telemetry_timeout_s: 0.5
-    following_vee_lateral_spacing_m: 0.4
-    following_vee_trail_spacing_m: 0.6928
+    following_vee_lateral_spacing_m: 0.8
+    following_vee_trail_spacing_m: 0.8
     following_line_abreast_lateral_spacing_m: 0.8
     hold_x: 0.0
     hold_y: 0.0
@@ -45,8 +45,8 @@ MAV3:
     control_loop_hz: 20.0
     status_loop_hz: 5.0
     telemetry_timeout_s: 0.5
-    following_vee_lateral_spacing_m: 0.4
-    following_vee_trail_spacing_m: 0.6928
+    following_vee_lateral_spacing_m: 0.8
+    following_vee_trail_spacing_m: 0.8
     following_line_abreast_lateral_spacing_m: 0.8
     hold_x: 0.0
     hold_y: 0.0
@@ -55,13 +55,13 @@ MAV3:
 
 ground_station_node:
   ros__parameters:
-    staging_lateral_spacing_m: 0.4
-    staging_trail_spacing_m: 0.6928
-    staging_position_tolerance_m: 0.5
-    formation_vee_lateral_spacing_m: 0.4
-    formation_vee_trail_spacing_m: 0.6928
+    staging_lateral_spacing_m: 0.8
+    staging_trail_spacing_m: 0.8
+    staging_position_tolerance_m: 0.02
+    formation_vee_lateral_spacing_m: 0.8
+    formation_vee_trail_spacing_m: 0.8
     formation_line_abreast_lateral_spacing_m: 0.8
-    formation_position_tolerance_m: 0.10
-    formation_yaw_tolerance_rad: 0.2
+    formation_position_tolerance_m: 0.02
+    formation_yaw_tolerance_rad: 0.1
     telemetry_fresh_timeout_s: 1.0
     staging_yaw_rad: 0.0
