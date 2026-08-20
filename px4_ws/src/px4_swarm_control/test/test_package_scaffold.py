@@ -127,8 +127,8 @@ def test_final_real_vehicle_doc_names_distributed_launches_and_mav_contract():
     assert '0.12' in text
     assert '0.15' in text
     assert '/MAV1/fmu/out/vehicle_local_position_v1' in text
-    assert '/MAV2/fmu/out/vehicle_status_v4' in text
-    assert '/MAV3/fmu/out/vehicle_command_ack_v1' in text
+    assert '/MAV2/fmu/out/vehicle_status_v1' in text
+    assert '/MAV3/fmu/out/vehicle_command_ack' in text
     assert '/vehicle_1' in text
 
 

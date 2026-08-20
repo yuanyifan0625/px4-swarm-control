@@ -34,18 +34,9 @@ def test_missing_gazebo_models_reports_only_absent_models():
     assert missing_gazebo_models(gz_topics) == ['x500_2']
 
 
-def test_missing_ros2_publishers_requires_versioned_px4_v118_topics():
-    topic_info = {
-        '/MAV1/fmu/out/vehicle_local_position_v1': 'Publisher count: 1\n',
-        '/MAV1/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
-        '/MAV1/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
-        '/MAV2/fmu/out/vehicle_local_position_v1': 'Publisher count: 0\n',
-        '/MAV2/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
-        '/MAV2/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
-        '/MAV3/fmu/out/vehicle_local_position_v1': 'Publisher count: 1\n',
-        '/MAV3/fmu/out/vehicle_status_v4': 'Publisher count: 1\n',
-        '/MAV3/fmu/out/vehicle_command_ack_v1': 'Publisher count: 1\n',
-    }
+def test_missing_ros2_publishers_requires_px4_v117_output_topics():
+    topic_info = {topic: 'Publisher count: 1\n' for topic in expected_ros2_topics()}
+    topic_info['/MAV2/fmu/out/vehicle_local_position_v1'] = 'Publisher count: 0\n'
 
     assert missing_ros2_publishers(topic_info) == [
         '/MAV2/fmu/out/vehicle_local_position_v1',
@@ -56,8 +47,10 @@ def test_expected_ros2_topics_do_not_use_old_vehicle_prefixes():
     topics = expected_ros2_topics()
 
     assert '/MAV1/fmu/out/vehicle_local_position_v1' in topics
-    assert '/MAV2/fmu/out/vehicle_status_v4' in topics
-    assert '/MAV3/fmu/out/vehicle_command_ack_v1' in topics
+    assert '/MAV2/fmu/out/vehicle_status_v1' in topics
+    assert '/MAV3/fmu/out/vehicle_command_ack' in topics
+    assert '/MAV1/fmu/out/vehicle_land_detected' in topics
+    assert '/MAV2/fmu/out/failsafe_flags' in topics
     assert all(not topic.startswith('/vehicle_') for topic in topics)
 
 

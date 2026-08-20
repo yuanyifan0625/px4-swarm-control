@@ -15,9 +15,7 @@ from px4_msgs.msg import (
     VehicleLocalPosition,
     VehicleStatus as Px4VehicleStatus,
 )
-from px4_swarm_control.bridge_config import PX4_V118_OUT_TOPIC_SUFFIXES
-from px4_swarm_control.bridge_config import PX4_V118_FAILSAFE_FLAGS_TOPIC_SUFFIX
-from px4_swarm_control.bridge_config import PX4_V118_LAND_DETECTED_TOPIC_SUFFIX
+from px4_swarm_control.bridge_config import PX4_V117, versioned_topic_suffix
 from px4_swarm_control.models import (
     CommandStatus,
     PositionYawSetpoint,
@@ -63,50 +61,47 @@ class Px4VehicleInterface:
         qos_profile = _px4_qos_profile()
         self.offboard_control_mode_publisher = node.create_publisher(
             OffboardControlMode,
-            self._topic('/fmu/in/offboard_control_mode'),
+            self._px4_topic('OffboardControlMode', OffboardControlMode),
             qos_profile,
         )
         self.trajectory_setpoint_publisher = node.create_publisher(
             TrajectorySetpoint,
-            self._topic('/fmu/in/trajectory_setpoint'),
+            self._px4_topic('TrajectorySetpoint', TrajectorySetpoint),
             qos_profile,
         )
         self.vehicle_command_publisher = node.create_publisher(
             VehicleCommand,
-            self._topic('/fmu/in/vehicle_command'),
+            self._px4_topic('VehicleCommand', VehicleCommand),
             qos_profile,
         )
         self.vehicle_local_position_subscription = node.create_subscription(
             VehicleLocalPosition,
-            # PX4 v1.18 會在部分 out topic 加版本尾綴，集中在邊界避免 controller 訂錯 topic。
-            self._topic(PX4_V118_OUT_TOPIC_SUFFIXES[0]),
+            self._px4_topic('VehicleLocalPosition', VehicleLocalPosition),
             self.handle_vehicle_local_position,
             qos_profile,
         )
         self.vehicle_status_subscription = node.create_subscription(
             Px4VehicleStatus,
-            # PX4 v1.18 會在部分 out topic 加版本尾綴，集中在邊界避免 controller 訂錯 topic。
-            self._topic(PX4_V118_OUT_TOPIC_SUFFIXES[1]),
+            self._px4_topic('VehicleStatus', Px4VehicleStatus),
             self.handle_vehicle_status,
             qos_profile,
         )
         self.vehicle_command_ack_subscription = node.create_subscription(
             VehicleCommandAck,
-            # PX4 v1.18 會在部分 out topic 加版本尾綴，集中在邊界避免 controller 訂錯 topic。
-            self._topic(PX4_V118_OUT_TOPIC_SUFFIXES[2]),
+            self._px4_topic('VehicleCommandAck', VehicleCommandAck),
             self.handle_vehicle_command_ack,
             qos_profile,
         )
         self.vehicle_land_detected_subscription = node.create_subscription(
             VehicleLandDetected,
             # landed telemetry 由 PX4 commander 判定，保護 ROS 2 不用猜測接地狀態。
-            self._topic(PX4_V118_LAND_DETECTED_TOPIC_SUFFIX),
+            self._px4_topic('VehicleLandDetected', VehicleLandDetected),
             self.handle_vehicle_land_detected,
             qos_profile,
         )
         self.failsafe_flags_subscription = node.create_subscription(
             FailsafeFlags,
-            self._topic(PX4_V118_FAILSAFE_FLAGS_TOPIC_SUFFIX),
+            self._px4_topic('FailsafeFlags', FailsafeFlags),
             self.handle_failsafe_flags,
             qos_profile,
         )
@@ -225,7 +220,9 @@ class Px4VehicleInterface:
             velocity=(local_position.vx, local_position.vy, local_position.vz),
             armed=vehicle_status.arming_state == Px4VehicleStatus.ARMING_STATE_ARMED,
             navigation_state=_navigation_state_name(vehicle_status.nav_state),
-            offboard_available=vehicle_status.accepts_offboard_setpoints,
+            offboard_available=bool(
+                getattr(vehicle_status, 'accepts_offboard_setpoints', False),
+            ),
             pre_flight_checks_pass=vehicle_status.pre_flight_checks_pass,
             offboard_control_signal_lost=(
                 self._latest_failsafe_flags is not None
@@ -270,6 +267,10 @@ class Px4VehicleInterface:
 
     def _topic(self, suffix: str) -> str:
         return f'{self.px4_namespace}{suffix}'
+
+    def _px4_topic(self, message_name: str, message_type: type) -> str:
+        contract = PX4_V117.message(message_name)
+        return self._topic(versioned_topic_suffix(contract.topic_suffix, message_type))
 
 
 def _normalize_namespace(namespace: str) -> str:

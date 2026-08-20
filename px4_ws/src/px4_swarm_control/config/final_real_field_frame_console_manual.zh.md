@@ -16,7 +16,7 @@ ros2 topic list | grep '^/MAV[123]/fmu/out'
 - 已確認飛場 field `+X/+Y/up` 各自對應哪個 PX4 local NED 軸與方向。
 - 不要假設 SITL 的 Gazebo visual profile 等於實機飛場座標。
 
-驗收條件：`/MAV1/fmu/out/vehicle_local_position_v1`、`/MAV2/fmu/out/vehicle_status_v4`、`/MAV3/fmu/out/vehicle_command_ack_v1` 都可 echo。
+驗收條件：`/MAV1/fmu/out/vehicle_local_position_v1`、`/MAV2/fmu/out/vehicle_status_v1`、`/MAV3/fmu/out/vehicle_command_ack` 都可 echo。
 
 ## 啟動 swarm 節點
 

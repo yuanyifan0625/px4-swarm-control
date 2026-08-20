@@ -8,13 +8,94 @@ from typing import Tuple
 from px4_swarm_control.models import Slot, VehicleRole
 
 
-PX4_V118_OUT_TOPIC_SUFFIXES = (
-    '/fmu/out/vehicle_local_position_v1',
-    '/fmu/out/vehicle_status_v1',
-    '/fmu/out/vehicle_command_ack_v1',
+@dataclass(frozen=True)
+class Px4MessageContract:
+    """One px4_msgs type and its unversioned ROS topic in a compatibility profile."""
+
+    message_type: str
+    topic_suffix: str
+    message_version: int
+    px4_definition_path: str
+    required_fields: tuple[str, ...] = ()
+    absent_fields: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Px4CompatibilityProfile:
+    """Pinned PX4/px4_msgs contract consumed only at the bridge boundary."""
+
+    name: str
+    px4_firmware_commit: str
+    px4_msgs_commit: str
+    message_contracts: tuple[Px4MessageContract, ...]
+
+    def message(self, message_type: str) -> Px4MessageContract:
+        for contract in self.message_contracts:
+            if contract.message_type == message_type:
+                return contract
+        raise KeyError(f'{message_type} is not part of {self.name}')
+
+
+PX4_V117 = Px4CompatibilityProfile(
+    name='PX4_V117',
+    px4_firmware_commit='d6f12ad1c4f70ad3230afd7d86e971421e02fef4',
+    px4_msgs_commit='86d8239e962f6939e05c3737784f60c02fa884db',
+    message_contracts=(
+        Px4MessageContract(
+            'FailsafeFlags', '/fmu/out/failsafe_flags', 0, 'msg/FailsafeFlags.msg',
+        ),
+        Px4MessageContract(
+            'OffboardControlMode',
+            '/fmu/in/offboard_control_mode',
+            0,
+            'msg/OffboardControlMode.msg',
+        ),
+        Px4MessageContract(
+            'TrajectorySetpoint',
+            '/fmu/in/trajectory_setpoint',
+            0,
+            'msg/versioned/TrajectorySetpoint.msg',
+        ),
+        Px4MessageContract(
+            'VehicleCommand',
+            '/fmu/in/vehicle_command',
+            0,
+            'msg/versioned/VehicleCommand.msg',
+        ),
+        Px4MessageContract(
+            'VehicleCommandAck',
+            '/fmu/out/vehicle_command_ack',
+            0,
+            'msg/versioned/VehicleCommandAck.msg',
+        ),
+        Px4MessageContract(
+            'VehicleLandDetected',
+            '/fmu/out/vehicle_land_detected',
+            0,
+            'msg/versioned/VehicleLandDetected.msg',
+        ),
+        Px4MessageContract(
+            'VehicleLocalPosition',
+            '/fmu/out/vehicle_local_position',
+            1,
+            'msg/versioned/VehicleLocalPosition.msg',
+        ),
+        Px4MessageContract(
+            'VehicleStatus',
+            '/fmu/out/vehicle_status',
+            1,
+            'msg/versioned/VehicleStatus.msg',
+            required_fields=('pre_flight_checks_pass',),
+            absent_fields=('accepts_offboard_setpoints',),
+        ),
+    ),
 )
-PX4_V118_LAND_DETECTED_TOPIC_SUFFIX = '/fmu/out/vehicle_land_detected'
-PX4_V118_FAILSAFE_FLAGS_TOPIC_SUFFIX = '/fmu/out/failsafe_flags'
+
+
+def versioned_topic_suffix(base_topic: str, message_type: type) -> str:
+    """Derive the PX4 ROS topic suffix from generated message metadata."""
+    version = int(getattr(message_type, 'MESSAGE_VERSION', 0))
+    return base_topic if version == 0 else f'{base_topic}_v{version}'
 
 
 @dataclass(frozen=True)

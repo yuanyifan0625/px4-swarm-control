@@ -85,12 +85,12 @@ source install/setup.bash
 ros2 topic info -v /MAV1/fmu/out/vehicle_local_position_v1
 ros2 topic info -v /MAV2/fmu/out/vehicle_local_position_v1
 ros2 topic info -v /MAV3/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /MAV1/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV2/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV3/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV1/fmu/out/vehicle_command_ack_v1
-ros2 topic info -v /MAV2/fmu/out/vehicle_command_ack_v1
-ros2 topic info -v /MAV3/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV2/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV3/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_command_ack
+ros2 topic info -v /MAV2/fmu/out/vehicle_command_ack
+ros2 topic info -v /MAV3/fmu/out/vehicle_command_ack
 ```
 
 通過條件：每個 topic 都要看到 `Publisher count: 1`。如果只有 `Subscription count`，代表只是 ROS 2 node 訂閱造成 topic 出現，不代表 PX4 有送資料。
@@ -106,7 +106,7 @@ source install/setup.bash
 ros2 run px4_swarm_control check_live_px4_gz_bridge
 ```
 
-通過條件：它回報三個 Gazebo model 和三台所有必要的 PX4 v1.18 telemetry publishers 都存在，且 exit code 為 `0`。
+通過條件：它回報三個 Gazebo model 和三台所有必要的 PX4 v1.17 telemetry publishers 都存在，且 exit code 為 `0`。
 
 如果 Terminal 1 有用 `tee` 存 Agent log，請用這個版本一起驗證三個 PX4 client session：
 
@@ -119,5 +119,5 @@ ros2 run px4_swarm_control check_live_px4_gz_bridge \
 
 - 專案 ROS 2 namespace 使用 `/MAV1`、`/MAV2`、`/MAV3`。
 - PX4 用 `PX4_UXRCE_DDS_NS=MAVN` 對齊這個 namespace convention。
-- PX4 v1.18 output topic 使用版本尾綴，例如 `vehicle_local_position_v1`、`vehicle_status_v4`、`vehicle_command_ack_v1`。
+- PX4 v1.17 topic suffix 由 message version 決定：`vehicle_local_position_v1`、`vehicle_status_v1` 有 `_v1`，version 0 的 `vehicle_command_ack` 沒有 suffix。
 - 使用 `-i 1`、`-i 2`、`-i 3` 啟動 PX4 時，第一版 `px4_target_system` 對應為 `2`、`3`、`4`。

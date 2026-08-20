@@ -5,12 +5,15 @@ from __future__ import annotations
 from argparse import ArgumentParser, ArgumentTypeError
 from math import hypot
 from re import search
-from subprocess import CompletedProcess, TimeoutExpired, run
+from subprocess import CompletedProcess, run, TimeoutExpired
 from typing import Mapping, Sequence
+
+from px4_msgs import msg as px4_msg
 
 from px4_swarm_control.bridge_config import (
     FIRST_VERSION_VEHICLES,
-    PX4_V118_OUT_TOPIC_SUFFIXES,
+    PX4_V117,
+    versioned_topic_suffix,
 )
 
 
@@ -34,11 +37,19 @@ def expected_px4_instance_commands() -> tuple[str, str, str]:
 
 
 def expected_ros2_topics() -> tuple[str, ...]:
-    """Return PX4 v1.18 runtime out topics that must have bridge publishers."""
+    """Return PX4 v1.17 output topics that must have bridge publishers."""
+    output_suffixes = tuple(
+        versioned_topic_suffix(
+            contract.topic_suffix,
+            getattr(px4_msg, contract.message_type),
+        )
+        for contract in PX4_V117.message_contracts
+        if contract.topic_suffix.startswith('/fmu/out/')
+    )
     return tuple(
         f'{vehicle.namespace}{suffix}'
         for vehicle in FIRST_VERSION_VEHICLES
-        for suffix in PX4_V118_OUT_TOPIC_SUFFIXES
+        for suffix in output_suffixes
     )
 
 

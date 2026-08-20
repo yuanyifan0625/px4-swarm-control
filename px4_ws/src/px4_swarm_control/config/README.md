@@ -90,12 +90,12 @@ gz topic -e -t /world/default/pose/info -n 1
 ros2 topic info -v /MAV1/fmu/out/vehicle_local_position_v1
 ros2 topic info -v /MAV2/fmu/out/vehicle_local_position_v1
 ros2 topic info -v /MAV3/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /MAV1/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV2/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV3/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV1/fmu/out/vehicle_command_ack_v1
-ros2 topic info -v /MAV2/fmu/out/vehicle_command_ack_v1
-ros2 topic info -v /MAV3/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV2/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV3/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_command_ack
+ros2 topic info -v /MAV2/fmu/out/vehicle_command_ack
+ros2 topic info -v /MAV3/fmu/out/vehicle_command_ack
 ```
 
 Expected result: each ROS 2 topic inspection shows `Publisher count: 1`. A topic
@@ -113,7 +113,17 @@ ros2 run px4_swarm_control check_live_px4_gz_bridge
 ```
 
 The command exits `0` only when all three Gazebo models and all required PX4
-v1.18 versioned telemetry publishers are present.
+v1.17 telemetry publishers are present.
+
+Before starting a live run, validate the generated message shapes, topic names,
+and all eight pinned message definitions from the repository root:
+
+```bash
+ros2 run px4_swarm_control check_px4_v117_compatibility
+```
+
+The command reports the pinned commits, actual message versions and fields, and
+derived topic names. It exits non-zero when the deployed contract is incompatible.
 
 If Terminal 1 wrote `/tmp/microxrceagent_8888.log`, also verify that one Agent
 accepted three PX4 client sessions:

@@ -1,4 +1,5 @@
 from math import isnan
+from types import SimpleNamespace
 
 from px4_msgs.msg import (
     FailsafeFlags,
@@ -16,11 +17,11 @@ from px4_swarm_control.models import (
     PositionYawSetpoint,
     VehicleLevelState,
 )
-from px4_swarm_control.px4_vehicle_interface import Px4VehicleInterface
 from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MAIN_MODE_AUTO
 from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MAIN_MODE_OFFBOARD
 from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MODE_ENABLED
 from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_SUB_MODE_AUTO_LOITER
+from px4_swarm_control.px4_vehicle_interface import Px4VehicleInterface
 
 
 class FakePublisher:
@@ -76,8 +77,8 @@ def test_interface_creates_vehicle_namespaced_px4_topics():
     ]
     assert subscriber_topics == [
         '/MAV2/fmu/out/vehicle_local_position_v1',
-        '/MAV2/fmu/out/vehicle_status_v4',
-        '/MAV2/fmu/out/vehicle_command_ack_v1',
+        '/MAV2/fmu/out/vehicle_status_v1',
+        '/MAV2/fmu/out/vehicle_command_ack',
         '/MAV2/fmu/out/vehicle_land_detected',
         '/MAV2/fmu/out/failsafe_flags',
     ]
@@ -186,12 +187,13 @@ def test_vehicle_state_converts_latest_px4_telemetry_to_internal_model():
     local_position.vz = -0.3
     local_position.heading = 0.5
 
-    vehicle_status = VehicleStatus()
-    vehicle_status.timestamp = 1_100_000
-    vehicle_status.arming_state = VehicleStatus.ARMING_STATE_ARMED
-    vehicle_status.nav_state = VehicleStatus.NAVIGATION_STATE_OFFBOARD
-    vehicle_status.accepts_offboard_setpoints = True
-    vehicle_status.pre_flight_checks_pass = False
+    vehicle_status = SimpleNamespace(
+        timestamp=1_100_000,
+        arming_state=VehicleStatus.ARMING_STATE_ARMED,
+        nav_state=VehicleStatus.NAVIGATION_STATE_OFFBOARD,
+        accepts_offboard_setpoints=True,
+        pre_flight_checks_pass=False,
+    )
 
     failsafe_flags = FailsafeFlags()
     failsafe_flags.offboard_control_signal_lost = True
@@ -213,6 +215,24 @@ def test_vehicle_state_converts_latest_px4_telemetry_to_internal_model():
     assert state.telemetry_age_s == 0.5
     assert state.vehicle_level_state is VehicleLevelState.IDLE
     assert state.landed is False
+
+
+def test_vehicle_state_treats_missing_offboard_acceptance_as_unavailable():
+    interface = make_interface(now_us=1_500_000)
+    local_position = VehicleLocalPosition()
+    local_position.timestamp = 1_000_000
+    vehicle_status = SimpleNamespace(
+        arming_state=VehicleStatus.ARMING_STATE_ARMED,
+        nav_state=VehicleStatus.NAVIGATION_STATE_OFFBOARD,
+        pre_flight_checks_pass=True,
+    )
+
+    interface.handle_vehicle_local_position(local_position)
+    interface.handle_vehicle_status(vehicle_status)
+
+    state = interface.vehicle_state()
+
+    assert state.offboard_available is False
 
 
 def test_vehicle_state_reports_landed_from_px4_land_detected_topic():

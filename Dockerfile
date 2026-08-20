@@ -96,7 +96,7 @@ RUN chmod +x /tmp/px4_setup/ubuntu.sh && \
     /tmp/px4_setup/ubuntu.sh && \
     rm -rf /tmp/px4_setup /var/lib/apt/lists/*
 
-# Install the Micro XRCE-DDS Agent version required by PX4 v1.18 with ROS 2 Jazzy.
+# Install the Micro XRCE-DDS Agent version used by the pinned PX4 v1.17 contract.
 RUN git clone --depth 1 --branch "${MICRO_XRCE_DDS_AGENT_VERSION}" \
         https://github.com/eProsima/Micro-XRCE-DDS-Agent.git \
         /tmp/Micro-XRCE-DDS-Agent && \

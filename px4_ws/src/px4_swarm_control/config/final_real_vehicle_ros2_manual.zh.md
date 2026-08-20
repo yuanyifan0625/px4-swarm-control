@@ -58,20 +58,20 @@ source install/setup.bash
 
 ```bash
 ros2 topic info -v /MAV1/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /MAV1/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV1/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV1/fmu/out/vehicle_command_ack
 ros2 topic info -v /MAV1/fmu/out/vehicle_land_detected
 ros2 topic info -v /MAV1/fmu/out/failsafe_flags
 
 ros2 topic info -v /MAV2/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /MAV2/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV2/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV2/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV2/fmu/out/vehicle_command_ack
 ros2 topic info -v /MAV2/fmu/out/vehicle_land_detected
 ros2 topic info -v /MAV2/fmu/out/failsafe_flags
 
 ros2 topic info -v /MAV3/fmu/out/vehicle_local_position_v1
-ros2 topic info -v /MAV3/fmu/out/vehicle_status_v4
-ros2 topic info -v /MAV3/fmu/out/vehicle_command_ack_v1
+ros2 topic info -v /MAV3/fmu/out/vehicle_status_v1
+ros2 topic info -v /MAV3/fmu/out/vehicle_command_ack
 ros2 topic info -v /MAV3/fmu/out/vehicle_land_detected
 ros2 topic info -v /MAV3/fmu/out/failsafe_flags
 ```

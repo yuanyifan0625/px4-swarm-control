@@ -22,3 +22,6 @@
   motion and verifies which PX4 local NED axis and sign changed.
 - **Field-frame console**: An operator console that accepts human field-frame
   movement commands and translates them into the existing swarm action goals.
+- **Offboard-setpoint acceptance**: PX4's explicit indication that the current
+  flight mode accepts Offboard trajectory setpoints. It is not eligibility to
+  enter Offboard mode and not the result of pre-flight checks.
