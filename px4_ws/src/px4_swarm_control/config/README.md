@@ -79,6 +79,16 @@ PX4_SIM_MODEL=gz_x500 \
 Expected result: model `x500_3` joins the existing Gazebo world at a separated
 horizontal position.
 
+After each PX4 terminal reaches its `pxh>` prompt, enter:
+
+```text
+param set NAV_DLL_ACT 0
+```
+
+PX4 v1.17's x500 profile otherwise requires a GCS data link before arming. This
+SITL-only setting keeps ROS 2 as the sole control entrypoint. Do not continue
+unless all three instances report `Ready for takeoff!`.
+
 ### Terminal 6: inspect live bridge truth
 
 ```bash
@@ -113,7 +123,8 @@ ros2 run px4_swarm_control check_live_px4_gz_bridge
 ```
 
 The command exits `0` only when all three Gazebo models and all required PX4
-v1.17 telemetry publishers are present.
+v1.17 telemetry publishers are present with the expected message types and
+bare-DDS endpoint identities.
 
 Before starting a live run, validate the generated message shapes, topic names,
 and all eight pinned message definitions from the repository root:

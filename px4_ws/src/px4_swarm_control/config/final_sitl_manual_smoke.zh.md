@@ -80,7 +80,16 @@ cd /home/ncrl/docker_ubuntu24/PX4-Autopilot
 PX4_GZ_NO_FOLLOW=1 PX4_UXRCE_DDS_NS=MAV3 PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 PX4_GZ_MODEL_POSE='0,-2,0' PX4_SIM_MODEL=gz_x500 ./build/px4_sitl_default/bin/px4 -i 3
 ```
 
-驗收條件：Gazebo 看到 `x500_1`、`x500_2`、`x500_3`。調整：namespace 必須是 `MAV1/MAV2/MAV3`，不要改成 `/vehicle_N`。
+每個 PX4 terminal 出現 `pxh>` 後，各輸入一次：
+
+```text
+param set NAV_DLL_ACT 0
+```
+
+驗收條件：Gazebo 看到 `x500_1`、`x500_2`、`x500_3`，且三台都回報
+`Ready for takeoff!`。PX4 v1.17 x500 預設要求 GCS；這個 SITL-only 設定讓驗證保持
+只由 ROS 2 控制。調整：namespace 必須是 `MAV1/MAV2/MAV3`，不要改成
+`/vehicle_N`。
 
 ## 4. 檢查 PX4 bridge topics
 
@@ -139,7 +148,13 @@ source install/setup.bash
 ros2 run px4_swarm_control operator_console
 ```
 
-若要用 launch 調整 settle：
+若要互動輸入並調整 settle，直接用 `ros2 run` 傳參數：
+
+```bash
+ros2 run px4_swarm_control operator_console --ros-args -p settle_position_tolerance_m:=0.10 -p settle_stable_duration_s:=1.5
+```
+
+也可用既有 launch wrapper 啟動相同節點：
 
 ```bash
 ros2 launch px4_swarm_control operator_console.launch.py settle_position_tolerance_m:=0.10 settle_stable_duration_s:=1.5

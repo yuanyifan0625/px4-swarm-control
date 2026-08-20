@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from math import nan
+from math import isfinite, nan
 from typing import Any, Callable, Optional
 
 from px4_msgs.msg import (
@@ -154,10 +154,20 @@ class Px4VehicleInterface:
 
     def takeoff(self, altitude_m: float, yaw: float = nan) -> None:
         # Takeoff command 保留為 PX4 高階任務命令，避免 ROS 2 直接實作起飛控制器。
+        # PX4 v1.17 將 MAV_CMD_NAV_TAKEOFF param7 解讀為 AMSL；上層介面則維持
+        # 相對起飛高度。沒有有效 local reference 時不送出無法確認高度的命令，
+        # vehicle node 下一個 control tick 會在 telemetry 就緒後重試。
+        if (
+            self._latest_local_position is None
+            or not self._latest_local_position.z_global
+            or not isfinite(self._latest_local_position.ref_alt)
+        ):
+            return
+        altitude_amsl = self._latest_local_position.ref_alt + altitude_m
         self._publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF,
             param4=yaw,
-            param7=altitude_m,
+            param7=altitude_amsl,
         )
 
     def land(self) -> None:
@@ -242,13 +252,15 @@ class Px4VehicleInterface:
         msg = VehicleCommand()
         msg.timestamp = self._timestamp_us()
         msg.command = command
-        msg.param1 = params.get('param1', 0.0)
-        msg.param2 = params.get('param2', 0.0)
-        msg.param3 = params.get('param3', 0.0)
-        msg.param4 = params.get('param4', 0.0)
-        msg.param5 = params.get('param5', 0.0)
-        msg.param6 = params.get('param6', 0.0)
-        msg.param7 = params.get('param7', 0.0)
+        # MAVLink command parameters not used by a command are NaN. Zero can be a
+        # valid coordinate/value and must not accidentally become a target.
+        msg.param1 = params.get('param1', nan)
+        msg.param2 = params.get('param2', nan)
+        msg.param3 = params.get('param3', nan)
+        msg.param4 = params.get('param4', nan)
+        msg.param5 = params.get('param5', nan)
+        msg.param6 = params.get('param6', nan)
+        msg.param7 = params.get('param7', nan)
         # 每台 PX4 instance 有自己的 MAV_SYS_ID，避免 takeoff/land command 打到錯的飛機。
         msg.target_system = self.px4_target_system
         msg.target_component = 1

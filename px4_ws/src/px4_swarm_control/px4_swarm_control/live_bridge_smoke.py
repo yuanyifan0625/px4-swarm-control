@@ -30,27 +30,43 @@ def expected_px4_instance_commands() -> tuple[str, str, str]:
             env.insert(1, 'PX4_GZ_STANDALONE=1')
             env.insert(3, f'PX4_GZ_MODEL_POSE="{vehicle.spawn_pose}"')
         command = ' '.join(
-            [*env, f'./build/px4_sitl_default/bin/px4 -i {vehicle.px4_instance}'],
+            [
+                *env,
+                f'./build/px4_sitl_default/bin/px4 -i {vehicle.px4_instance}',
+            ],
         )
         commands.append(command)
     return tuple(commands)
 
 
+def expected_px4_prompt_setup() -> str:
+    """Return the v1.17 SITL-only setup entered at every PX4 prompt."""
+    return 'param set NAV_DLL_ACT 0'
+
+
 def expected_ros2_topics() -> tuple[str, ...]:
     """Return PX4 v1.17 output topics that must have bridge publishers."""
+    return tuple(expected_ros2_topic_types())
+
+
+def expected_ros2_topic_types() -> dict[str, str]:
+    """Return each required PX4 output topic and its generated ROS message type."""
     output_suffixes = tuple(
-        versioned_topic_suffix(
-            contract.topic_suffix,
-            getattr(px4_msg, contract.message_type),
+        (
+            versioned_topic_suffix(
+                contract.topic_suffix,
+                getattr(px4_msg, contract.message_type),
+            ),
+            f'px4_msgs/msg/{contract.message_type}',
         )
         for contract in PX4_V117.message_contracts
         if contract.topic_suffix.startswith('/fmu/out/')
     )
-    return tuple(
-        f'{vehicle.namespace}{suffix}'
+    return {
+        f'{vehicle.namespace}{suffix}': message_type
         for vehicle in FIRST_VERSION_VEHICLES
-        for suffix in output_suffixes
-    )
+        for suffix, message_type in output_suffixes
+    }
 
 
 def missing_gazebo_models(gz_topic_list_output: str) -> list[str]:
@@ -68,6 +84,27 @@ def missing_ros2_publishers(topic_info_by_topic: Mapping[str, str]) -> list[str]
         for topic in expected_ros2_topics()
         if _publisher_count(topic_info_by_topic.get(topic, '')) < 1
     ]
+
+
+def publisher_endpoint_errors(
+    topic: str,
+    expected_type: str,
+    topic_info_output: str,
+) -> tuple[str, ...]:
+    """Validate one PX4 publisher's type and bare-DDS endpoint identity."""
+    errors = []
+    lines = {line.strip() for line in topic_info_output.splitlines()}
+    if f'Type: {expected_type}' not in lines:
+        errors.append(f'{topic}: expected type {expected_type}')
+    endpoint_blocks = topic_info_output.split('Node name:')[1:]
+    has_bare_dds_publisher = any(
+        block.lstrip().startswith('_CREATED_BY_BARE_DDS_APP_')
+        and 'Endpoint type: PUBLISHER' in block
+        for block in endpoint_blocks
+    )
+    if not has_bare_dds_publisher:
+        errors.append(f'{topic}: publisher is not a bare DDS endpoint')
+    return tuple(errors)
 
 
 def disconnected_agent_clients(agent_log_output: str) -> list[str]:
@@ -110,6 +147,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print('Expected manual PX4 commands:')
     for index, command in enumerate(expected_px4_instance_commands(), start=1):
         print(f'  Terminal PX4-{index}: {command}')
+    print(
+        'After each PX4 prompt is ready, enter: '
+        f'{expected_px4_prompt_setup()}',
+    )
 
     gz_result = _run_command(('gz', 'topic', '-l'))
     pose_result = _run_command(
@@ -124,6 +165,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     missing_models = missing_gazebo_models(gz_result.stdout)
     missing_pose = models_without_separated_pose(pose_result.stdout)
     missing_topics = missing_ros2_publishers(topic_info)
+    endpoint_errors = tuple(
+        error
+        for topic, expected_type in expected_ros2_topic_types().items()
+        for error in publisher_endpoint_errors(
+            topic,
+            expected_type,
+            topic_info.get(topic, ''),
+        )
+    )
     missing_agent_sessions = (
         disconnected_agent_clients(agent_log) if args.agent_log else []
     )
@@ -145,6 +195,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         print('ROS 2 PX4 publishers OK for all vehicle telemetry topics')
 
+    if endpoint_errors:
+        print('Invalid ROS 2 PX4 publisher endpoints:')
+        for error in endpoint_errors:
+            print(f'  {error}')
+    else:
+        print('ROS 2 PX4 publisher endpoint types and bare-DDS identities OK')
+
     if args.agent_log:
         if missing_agent_sessions:
             print('Micro XRCE-DDS Agent did not log three established sessions')
@@ -153,7 +210,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         print('Agent log not checked; pass --agent-log to verify three sessions')
 
-    if missing_models or missing_pose or missing_topics or missing_agent_sessions:
+    if (
+        missing_models
+        or missing_pose
+        or missing_topics
+        or endpoint_errors
+        or missing_agent_sessions
+    ):
         return 1
     return 0
 

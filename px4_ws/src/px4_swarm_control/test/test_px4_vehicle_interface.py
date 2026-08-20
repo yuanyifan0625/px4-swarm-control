@@ -121,6 +121,10 @@ def test_publish_position_yaw_setpoint_maps_internal_model_to_px4_message():
 
 def test_vehicle_commands_include_expected_command_ids_and_params():
     interface = make_interface(now_us=4000)
+    local_position = VehicleLocalPosition()
+    local_position.ref_alt = 125.5
+    local_position.z_global = True
+    interface.handle_vehicle_local_position(local_position)
 
     interface.arm()
     interface.disarm()
@@ -141,7 +145,11 @@ def test_vehicle_commands_include_expected_command_ids_and_params():
     assert commands[0].param1 == 1.0
     assert commands[1].param1 == 0.0
     assert commands[2].param4 == 1.2
-    assert commands[2].param7 == 8.0
+    assert commands[2].param7 == 133.5
+    assert isnan(commands[2].param5)
+    assert isnan(commands[2].param6)
+    assert isnan(commands[3].param5)
+    assert isnan(commands[3].param6)
     assert commands[4].param1 == PX4_CUSTOM_MODE_ENABLED
     assert commands[4].param2 == PX4_CUSTOM_MAIN_MODE_OFFBOARD
     assert commands[5].param1 == PX4_CUSTOM_MODE_ENABLED
@@ -150,6 +158,14 @@ def test_vehicle_commands_include_expected_command_ids_and_params():
     assert all(msg.from_external for msg in commands)
     assert all(msg.timestamp == 4000 for msg in commands)
     assert all(msg.target_system == 3 for msg in commands)
+
+
+def test_takeoff_without_local_reference_does_not_publish_unsafe_command():
+    interface = make_interface(now_us=4000)
+
+    interface.takeoff(altitude_m=8.0)
+
+    assert interface.vehicle_command_publisher.messages == []
 
 
 def test_vehicle_command_target_system_can_be_broadcast_for_smoke_testing():

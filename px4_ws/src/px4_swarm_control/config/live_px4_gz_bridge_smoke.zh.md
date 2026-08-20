@@ -67,6 +67,16 @@ PX4_SIM_MODEL=gz_x500 \
 
 通過條件：Gazebo 裡新增 `x500_3`，位置和其他兩台有水平距離。
 
+三個 PX4 terminal 各自出現 `pxh>` 後，都輸入：
+
+```text
+param set NAV_DLL_ACT 0
+```
+
+PX4 v1.17 的 x500 profile 預設要求 GCS data link；本流程只允許 ROS 2
+作為控制入口，因此以這個 SITL-only 參數解除 GCS arming requirement。三台都應回報
+`Ready for takeoff!`，否則不得繼續。
+
 ## Terminal 6：確認 Gazebo 真的有三台
 
 ```bash
@@ -106,7 +116,9 @@ source install/setup.bash
 ros2 run px4_swarm_control check_live_px4_gz_bridge
 ```
 
-通過條件：它回報三個 Gazebo model 和三台所有必要的 PX4 v1.17 telemetry publishers 都存在，且 exit code 為 `0`。
+通過條件：它回報三個 Gazebo model、三台所有必要的 PX4 v1.17 telemetry
+publishers、正確 message type 與 bare-DDS endpoint identity 都存在，且 exit code 為
+`0`。
 
 如果 Terminal 1 有用 `tee` 存 Agent log，請用這個版本一起驗證三個 PX4 client session：
 
