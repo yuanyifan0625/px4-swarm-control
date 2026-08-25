@@ -12,6 +12,11 @@ from typing import Callable, Dict
 
 from builtin_interfaces.msg import Time
 from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES
+from px4_swarm_control.collision_safety_gate import (
+    CollisionSafetyConfig,
+    evaluate_leader_movement,
+    VehicleObservation,
+)
 from px4_swarm_control.geometry import (
     body_offset_to_world,
     formation_body_offset,
@@ -66,6 +71,7 @@ class GroundStationConfig:
     formation_yaw_tolerance_rad: float = 0.2
     telemetry_fresh_timeout_s: float = 1.0
     staging_yaw_rad: float = 0.0
+    safety_minimum_horizontal_distance_m: float = 0.7
 
 
 @dataclass(frozen=True)
@@ -246,7 +252,6 @@ class GroundStationCore:
             # Pause 期間拒絕新移動，保護 operator 以為系統停住時仍偷偷更新目標。
             self._move_leader_rejection = 'MoveLeader rejected while swarm is paused'
             return self.move_leader_feedback()
-        self.vehicle_statuses = {}
         self._move_leader_started_s = self.now_s()
         self._move_leader_timeout_s = max(float(request.timeout_sec), 0.0)
         self._move_leader_position_tolerance_m = float(request.position_tolerance_m)
@@ -259,6 +264,13 @@ class GroundStationCore:
         if not self._valid_move_leader_request(request):
             self._move_leader_rejection = 'invalid leader goal'
             self._transition_to(MissionState.ERROR, self._move_leader_rejection)
+            return self.move_leader_feedback()
+
+        movement_safety = self._leader_movement_safety(request)
+        if not movement_safety.allowed:
+            self._move_leader_rejection = (
+                f'MoveLeader rejected: {movement_safety.reason}'
+            )
             return self.move_leader_feedback()
 
         self._transition_to(MissionState.FOLLOWING, 'leader goal accepted')
@@ -657,6 +669,42 @@ class GroundStationCore:
             and float(request.yaw_tolerance_rad) > 0.0
         )
 
+    def _leader_movement_safety(self, request: MoveLeader.Goal):
+        leader_goal = PositionYawSetpoint(request.x, request.y, request.z, request.yaw)
+        geometry = FormationGeometry(
+            vee_lateral_spacing_m=self.config.formation_vee_lateral_spacing_m,
+            vee_trail_spacing_m=self.config.formation_vee_trail_spacing_m,
+            line_abreast_lateral_spacing_m=(
+                self.config.formation_line_abreast_lateral_spacing_m
+            ),
+        )
+        theoretical_positions = {1: leader_goal}
+        for vehicle in _follower_bridge_expectations():
+            theoretical_positions[vehicle.px4_instance] = body_offset_to_world(
+                leader_goal,
+                formation_body_offset(
+                    InternalFormationMode(self.active_formation),
+                    vehicle.slot,
+                    geometry,
+                ),
+            )
+        actual_observations = {
+            vehicle.px4_instance: _guard_status_observation(
+                self.vehicle_statuses.get(vehicle.px4_instance)
+            )
+            for vehicle in FIRST_VERSION_VEHICLES
+        }
+        return evaluate_leader_movement(
+            actual_observations=actual_observations,
+            theoretical_positions=theoretical_positions,
+            config=CollisionSafetyConfig(
+                minimum_horizontal_distance_m=(
+                    self.config.safety_minimum_horizontal_distance_m
+                ),
+                telemetry_timeout_s=self.config.telemetry_fresh_timeout_s,
+            ),
+        )
+
     def _leader_status(self) -> VehicleStatus | None:
         return self.vehicle_statuses.get(1)
 
@@ -1014,6 +1062,7 @@ class GroundStationNode(Node):
         self.declare_parameter('formation_yaw_tolerance_rad', 0.2)
         self.declare_parameter('telemetry_fresh_timeout_s', 1.0)
         self.declare_parameter('staging_yaw_rad', 0.0)
+        self.declare_parameter('safety_minimum_horizontal_distance_m', 0.7)
 
     def _load_config(self) -> GroundStationConfig:
         return GroundStationConfig(
@@ -1046,6 +1095,9 @@ class GroundStationNode(Node):
                 self.get_parameter('telemetry_fresh_timeout_s').value,
             ),
             staging_yaw_rad=float(self.get_parameter('staging_yaw_rad').value),
+            safety_minimum_horizontal_distance_m=float(
+                self.get_parameter('safety_minimum_horizontal_distance_m').value,
+            ),
         )
 
 
@@ -1076,6 +1128,19 @@ def _yaw_error_rad(current_yaw: float, target_yaw: float) -> float:
 
 def _status_pose_is_finite(status: VehicleStatus) -> bool:
     return all(isfinite(value) for value in (status.x, status.y, status.z, status.yaw))
+
+
+def _guard_status_observation(status: VehicleStatus | None):
+    if status is None or not status.armed or status.nav_state != 'offboard':
+        return None
+    return VehicleObservation(
+        vehicle_id=int(status.vehicle_id),
+        x=status.x,
+        y=status.y,
+        z=status.z,
+        yaw=status.yaw,
+        telemetry_age_s=status.last_telemetry_age_sec,
+    )
 
 
 def _formation_status_close(

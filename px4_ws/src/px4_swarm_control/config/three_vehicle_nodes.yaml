@@ -12,6 +12,9 @@ MAV1:
     following_vee_lateral_spacing_m: 1.0
     following_vee_trail_spacing_m: 1.0
     following_line_abreast_lateral_spacing_m: 1.0
+    safety_minimum_horizontal_distance_m: 0.7
+    safety_transition_duration_s: 1.0
+    safety_fallback_step_m: 0.3
     hold_x: 0.0
     hold_y: 0.0
     hold_z: -1.0
@@ -30,6 +33,9 @@ MAV2:
     following_vee_lateral_spacing_m: 1.0
     following_vee_trail_spacing_m: 1.0
     following_line_abreast_lateral_spacing_m: 1.0
+    safety_minimum_horizontal_distance_m: 0.7
+    safety_transition_duration_s: 1.0
+    safety_fallback_step_m: 0.3
     hold_x: 0.0
     hold_y: 0.0
     hold_z: -1.0
@@ -48,6 +54,9 @@ MAV3:
     following_vee_lateral_spacing_m: 1.0
     following_vee_trail_spacing_m: 1.0
     following_line_abreast_lateral_spacing_m: 1.0
+    safety_minimum_horizontal_distance_m: 0.7
+    safety_transition_duration_s: 1.0
+    safety_fallback_step_m: 0.3
     hold_x: 0.0
     hold_y: 0.0
     hold_z: -1.0
@@ -65,3 +74,4 @@ ground_station_node:
     formation_yaw_tolerance_rad: 0.1
     telemetry_fresh_timeout_s: 1.0
     staging_yaw_rad: 0.0
+    safety_minimum_horizontal_distance_m: 0.7

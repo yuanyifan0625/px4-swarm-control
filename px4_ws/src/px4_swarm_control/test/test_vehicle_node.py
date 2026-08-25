@@ -249,6 +249,7 @@ def test_follower_left_derives_vee_setpoint_from_fresh_leader_status():
         config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
+    prepare_safe_follower_telemetry(core, px4_interface, 'MAV2')
 
     core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
     core.control_tick()
@@ -265,6 +266,7 @@ def test_follower_right_derives_vee_setpoint_from_fresh_leader_status():
         config=follower_config('MAV3', Slot.FOLLOWER_RIGHT),
         px4_interface=px4_interface,
     )
+    prepare_safe_follower_telemetry(core, px4_interface, 'MAV3')
 
     core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
     core.control_tick()
@@ -281,6 +283,7 @@ def test_follower_uses_current_formation_mode_topic_for_local_offset():
         config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
+    prepare_safe_follower_telemetry(core, px4_interface, 'MAV2')
     mode = FormationMode()
     mode.mode = FormationMode.VEE
 
@@ -299,6 +302,7 @@ def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
         config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
+    prepare_safe_follower_telemetry(core, px4_interface, 'MAV2')
     mode = FormationMode()
     mode.mode = FormationMode.LINE_ABREAST
 
@@ -309,6 +313,36 @@ def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
     assert px4_interface.setpoints == [
         PositionYawSetpoint(10.0, 21.0, -5.0, 0.0),
     ]
+
+
+def test_follower_control_tick_enters_collision_hold_and_publishes_slot_fallback():
+    clock = [0.0]
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            vehicle_id='MAV2',
+            x=0.0,
+            y=0.0,
+            z=-1.0,
+            vehicle_level_state=VehicleLevelState.FOLLOWING,
+        ),
+    )
+    core = make_core(
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+        now_s=lambda: clock[0],
+    )
+    core.handle_leader_status(leader_status(x=0.0, y=2.0, z=-1.0, yaw=0.0))
+    core.handle_peer_status(
+        peer_status(3, x=0.6, y=0.0, slot='follower_right'),
+    )
+
+    core.control_tick()
+    clock[0] = 1.0
+    core.control_tick()
+
+    assert px4_interface.setpoints[0] == PositionYawSetpoint(-1.0, 3.0, -1.0, 0.0)
+    assert px4_interface.setpoints[1] == PositionYawSetpoint(0.0, 0.3, -1.0, 0.0)
+    assert core.vehicle_level_state is VehicleLevelState.HOLDING
 
 
 def test_follower_holds_when_leader_status_is_stale():
@@ -326,6 +360,52 @@ def test_follower_holds_when_leader_status_is_stale():
     assert core.vehicle_level_state is VehicleLevelState.FAILSAFE
     assert px4_interface.setpoints == []
     assert px4_interface.safe_hover_calls == 1
+
+
+def test_follower_freezes_last_safe_target_when_leader_telemetry_becomes_stale():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+    prepare_safe_follower_telemetry(core, px4_interface, 'MAV2')
+    core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
+    core.control_tick()
+
+    core.handle_leader_status(
+        leader_status(
+            x=10.0,
+            y=20.0,
+            z=-5.0,
+            yaw=0.0,
+            last_telemetry_age_sec=5.0,
+        )
+    )
+    core.control_tick()
+
+    expected = PositionYawSetpoint(9.0, 21.0, -5.0, 0.0)
+    assert px4_interface.setpoints == [expected, expected]
+    assert px4_interface.safe_hover_calls == 0
+    assert core.vehicle_level_state is VehicleLevelState.FAILSAFE
+
+
+def test_follower_freezes_last_safe_target_when_own_telemetry_becomes_stale():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+    prepare_safe_follower_telemetry(core, px4_interface, 'MAV2')
+    core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
+    core.control_tick()
+
+    px4_interface.stale = True
+    core.control_tick()
+
+    expected = PositionYawSetpoint(9.0, 21.0, -5.0, 0.0)
+    assert px4_interface.setpoints == [expected, expected]
+    assert px4_interface.safe_hover_calls == 0
+    assert core.vehicle_level_state is VehicleLevelState.FAILSAFE
 
 
 def test_follower_holds_while_leader_is_only_staged_not_following():
@@ -411,6 +491,7 @@ def test_follower_pause_resume_waits_for_fresh_following_leader_before_following
         config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
         px4_interface=px4_interface,
     )
+    prepare_safe_follower_telemetry(core, px4_interface, 'MAV2')
     core.handle_leader_status(leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0))
     core.control_tick()
     assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
@@ -1055,26 +1136,31 @@ def test_vehicle_id_to_uint8_extracts_numeric_suffix():
 
 def vehicle_state(
     *,
+    vehicle_id='MAV1',
+    x=0.0,
+    y=0.0,
     z=-5.0,
+    yaw=0.0,
     armed=True,
     navigation_state='offboard',
     offboard_available=False,
     pre_flight_checks_pass=True,
     offboard_control_signal_lost=False,
     landed=False,
+    telemetry_age_s=0.1,
     vehicle_level_state=VehicleLevelState.HOLDING,
 ):
     return VehicleState(
-        vehicle_id='MAV1',
-        position=(0.0, 0.0, z),
-        yaw=0.0,
+        vehicle_id=vehicle_id,
+        position=(x, y, z),
+        yaw=yaw,
         velocity=(0.0, 0.0, 0.0),
         armed=armed,
         navigation_state=navigation_state,
         offboard_available=offboard_available,
         pre_flight_checks_pass=pre_flight_checks_pass,
         offboard_control_signal_lost=offboard_control_signal_lost,
-        telemetry_age_s=0.1,
+        telemetry_age_s=telemetry_age_s,
         vehicle_level_state=vehicle_level_state,
         landed=landed,
     )
@@ -1146,3 +1232,52 @@ def leader_status(
     status.last_telemetry_age_sec = last_telemetry_age_sec
     status.vehicle_state = vehicle_state
     return status
+
+
+def peer_status(
+    vehicle_id,
+    *,
+    x,
+    y,
+    z=-1.0,
+    yaw=0.0,
+    last_telemetry_age_sec=0.1,
+    slot='',
+    vehicle_state='following',
+):
+    status = SwarmVehicleStatus()
+    status.vehicle_id = vehicle_id
+    status.role = 'follower'
+    status.slot = slot
+    status.x = x
+    status.y = y
+    status.z = z
+    status.yaw = yaw
+    status.armed = True
+    status.nav_state = 'offboard'
+    status.last_telemetry_age_sec = last_telemetry_age_sec
+    status.vehicle_state = vehicle_state
+    return status
+
+
+def prepare_safe_follower_telemetry(core, px4_interface, vehicle_id):
+    if vehicle_id == 'MAV2':
+        own_y = 21.0
+        peer_id = 3
+        peer_y = 19.0
+        peer_slot = 'follower_right'
+    else:
+        own_y = 19.0
+        peer_id = 2
+        peer_y = 21.0
+        peer_slot = 'follower_left'
+    px4_interface.state = vehicle_state(
+        vehicle_id=vehicle_id,
+        x=9.0,
+        y=own_y,
+        z=-5.0,
+        vehicle_level_state=VehicleLevelState.FOLLOWING,
+    )
+    core.handle_peer_status(
+        peer_status(peer_id, x=9.0, y=peer_y, z=-5.0, slot=peer_slot)
+    )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import nan
+from math import isfinite, nan
 from re import search
 from time import monotonic
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -12,6 +12,11 @@ from px4_swarm_control.bridge_config import (
     FIRST_VERSION_BY_VEHICLE_ID,
     FIRST_VERSION_LEADER,
     FIRST_VERSION_VEHICLES,
+)
+from px4_swarm_control.collision_safety_gate import (
+    CollisionSafetyConfig,
+    CollisionSafetyGate,
+    VehicleObservation,
 )
 from px4_swarm_control.follower_controller import (
     derive_follower_setpoint,
@@ -59,6 +64,9 @@ class VehicleNodeConfig:
     following_vee_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
     following_vee_trail_spacing_m: float = VEE_TRAIL_SPACING_M
     following_line_abreast_lateral_spacing_m: float = LINE_ABREAST_LATERAL_SPACING_M
+    safety_minimum_horizontal_distance_m: float = 0.7
+    safety_transition_duration_s: float = 1.0
+    safety_fallback_step_m: float = 0.3
 
 
 class VehicleNodeCore:
@@ -81,6 +89,18 @@ class VehicleNodeCore:
         self.active_setpoint = config.hold_setpoint
         self.active_formation = InternalFormationMode.VEE
         self.leader_status: Optional[SwarmVehicleStatus] = None
+        self.peer_statuses: Dict[int, SwarmVehicleStatus] = {}
+        self._collision_safety_gate = CollisionSafetyGate(
+            CollisionSafetyConfig(
+                minimum_horizontal_distance_m=(
+                    config.safety_minimum_horizontal_distance_m
+                ),
+                transition_duration_s=config.safety_transition_duration_s,
+                fallback_step_m=config.safety_fallback_step_m,
+                telemetry_timeout_s=config.telemetry_timeout_s,
+            )
+        )
+        self._collision_safety_holding = False
         self._leader_goal_active = False
         self._warned_ignored_leader_goal = False
         self._warned_mismatched_vehicle_state = False
@@ -114,6 +134,18 @@ class VehicleNodeCore:
         if int(msg.vehicle_id) != 1:
             return
         self.leader_status = msg
+        self.peer_statuses[1] = msg
+
+    def handle_peer_status(self, msg: SwarmVehicleStatus) -> None:
+        if self.config.role is not VehicleRole.FOLLOWER:
+            return
+        vehicle_id = int(msg.vehicle_id)
+        if vehicle_id == vehicle_id_to_uint8(self.config.vehicle_id):
+            return
+        if vehicle_id == 1:
+            self.handle_leader_status(msg)
+            return
+        self.peer_statuses[vehicle_id] = msg
 
     def handle_formation_mode(self, msg: SwarmFormationMode) -> None:
         if self.config.role is not VehicleRole.FOLLOWER:
@@ -213,10 +245,16 @@ class VehicleNodeCore:
         if self.px4_interface.is_telemetry_stale():
             # telemetry 過期時只重送最後安全 setpoint，保護 vehicle 不追 stale command。
             self.transition_to(VehicleLevelState.FAILSAFE, 'vehicle telemetry stale')
-            self.px4_interface.publish_safe_hover_setpoint()
+            if self.config.role is VehicleRole.FOLLOWER and self._update_follower_setpoint(
+                state,
+                own_telemetry_trusted=False,
+            ):
+                self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
+            else:
+                self.px4_interface.publish_safe_hover_setpoint()
             return
         if self.config.role is VehicleRole.FOLLOWER:
-            if not self._update_follower_setpoint():
+            if not self._update_follower_setpoint(state):
                 # leader 資訊過期時不追舊 setpoint，保護 follower 不被 stale leader 狀態拖走。
                 next_state = (
                     VehicleLevelState.FAILSAFE
@@ -232,34 +270,71 @@ class VehicleNodeCore:
 
         # 每個 tick 都補 heartbeat/setpoint，保護 PX4 Offboard mode 不因間隔過久退出。
         self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
-        next_state = (
-            VehicleLevelState.STAGING
-            if self.vehicle_level_state is VehicleLevelState.STAGING
-            else VehicleLevelState.FOLLOWING
-            if self._leader_goal_active or follower_setpoint_active
-            else VehicleLevelState.HOLDING
-        )
+        if self.config.role is VehicleRole.FOLLOWER and self._leader_telemetry_untrusted():
+            next_state = VehicleLevelState.FAILSAFE
+        elif self.vehicle_level_state is VehicleLevelState.STAGING:
+            next_state = VehicleLevelState.STAGING
+        elif (
+            self._leader_goal_active or follower_setpoint_active
+        ) and not self._collision_safety_holding:
+            next_state = VehicleLevelState.FOLLOWING
+        else:
+            next_state = VehicleLevelState.HOLDING
         self.transition_to(next_state, 'active setpoint published')
 
-    def _update_follower_setpoint(self) -> bool:
-        if not leader_status_is_fresh(
+    def _update_follower_setpoint(
+        self,
+        own_state,
+        *,
+        own_telemetry_trusted: bool = True,
+    ) -> bool:
+        leader_is_fresh = leader_status_is_fresh(
             self.leader_status,
             self.config.telemetry_timeout_s,
-        ):
+        )
+        if not leader_is_fresh and not self._leader_telemetry_untrusted():
             return False
-        geometry = FormationGeometry(
-            vee_lateral_spacing_m=self.config.following_vee_lateral_spacing_m,
-            vee_trail_spacing_m=self.config.following_vee_trail_spacing_m,
-            line_abreast_lateral_spacing_m=(
-                self.config.following_line_abreast_lateral_spacing_m
-            ),
+        if leader_is_fresh:
+            geometry = FormationGeometry(
+                vee_lateral_spacing_m=self.config.following_vee_lateral_spacing_m,
+                vee_trail_spacing_m=self.config.following_vee_trail_spacing_m,
+                line_abreast_lateral_spacing_m=(
+                    self.config.following_line_abreast_lateral_spacing_m
+                ),
+            )
+            candidate_target = derive_follower_setpoint(
+                leader_status_setpoint(self.leader_status),
+                self.active_formation,
+                self.config.slot,
+                geometry,
+            )
+        else:
+            candidate_target = self.active_setpoint
+        own_observation = (
+            _vehicle_state_observation(own_state, self.config.vehicle_id)
+            if own_telemetry_trusted
+            else None
         )
-        self.active_setpoint = derive_follower_setpoint(
-            leader_status_setpoint(self.leader_status),
-            self.active_formation,
-            self.config.slot,
-            geometry,
+        own_vehicle_id = vehicle_id_to_uint8(self.config.vehicle_id)
+        peer_observations = {
+            vehicle.px4_instance: _swarm_status_observation(
+                self.peer_statuses.get(vehicle.px4_instance)
+            )
+            for vehicle in FIRST_VERSION_VEHICLES
+            if vehicle.px4_instance != own_vehicle_id
+        }
+        decision = self._collision_safety_gate.evaluate(
+            candidate_target=candidate_target,
+            own_observation=own_observation,
+            peer_observations=peer_observations,
+            slot=self.config.slot,
+            leader_yaw=self._safety_fallback_yaw(own_observation),
+            now_s=self._now_s(),
         )
+        self._collision_safety_holding = decision.holding
+        if decision.target is None:
+            return False
+        self.active_setpoint = decision.target
         return True
 
     def _leader_status_is_stale(self) -> bool:
@@ -267,6 +342,30 @@ class VehicleNodeCore:
             return False
         age = self.leader_status.last_telemetry_age_sec
         return age != age or age > self.config.telemetry_timeout_s
+
+    def _leader_telemetry_untrusted(self) -> bool:
+        if self.leader_status is None:
+            return True
+        return not all(
+            isfinite(value)
+            for value in (
+                self.leader_status.x,
+                self.leader_status.y,
+                self.leader_status.z,
+                self.leader_status.yaw,
+                self.leader_status.last_telemetry_age_sec,
+            )
+        ) or self._leader_status_is_stale()
+
+    def _safety_fallback_yaw(
+        self,
+        own_observation: VehicleObservation | None,
+    ) -> float:
+        if self.leader_status is not None and isfinite(self.leader_status.yaw):
+            return self.leader_status.yaw
+        if own_observation is not None:
+            return own_observation.yaw
+        return 0.0
 
     def _control_takeoff_to_staging(self, state) -> None:
         if state is None or self.px4_interface.is_telemetry_stale():
@@ -482,15 +581,20 @@ class VehicleNode(Node):
             self.core.handle_staging_setpoint,
             10,
         )
-        self.leader_status_subscription = None
+        self.peer_status_subscriptions = []
         self.formation_mode_subscription = None
         if self.config.role is VehicleRole.FOLLOWER:
-            self.leader_status_subscription = self.create_subscription(
-                SwarmVehicleStatus,
-                f'{FIRST_VERSION_LEADER.namespace}/status',
-                self.core.handle_leader_status,
-                10,
-            )
+            own_vehicle_id = vehicle_id_to_uint8(self.config.vehicle_id)
+            self.peer_status_subscriptions = [
+                self.create_subscription(
+                    SwarmVehicleStatus,
+                    f'{vehicle.namespace}/status',
+                    self.core.handle_peer_status,
+                    10,
+                )
+                for vehicle in FIRST_VERSION_VEHICLES
+                if vehicle.px4_instance != own_vehicle_id
+            ]
             self.formation_mode_subscription = self.create_subscription(
                 SwarmFormationMode,
                 '/swarm/formation_mode',
@@ -524,6 +628,9 @@ class VehicleNode(Node):
             'following_line_abreast_lateral_spacing_m',
             LINE_ABREAST_LATERAL_SPACING_M,
         )
+        self.declare_parameter('safety_minimum_horizontal_distance_m', 0.7)
+        self.declare_parameter('safety_transition_duration_s', 1.0)
+        self.declare_parameter('safety_fallback_step_m', 0.3)
         self.declare_parameter('hold_x', 0.0)
         self.declare_parameter('hold_y', 0.0)
         self.declare_parameter('hold_z', -2.0)
@@ -545,6 +652,9 @@ class VehicleNode(Node):
             'following_vee_lateral_spacing_m',
             'following_vee_trail_spacing_m',
             'following_line_abreast_lateral_spacing_m',
+            'safety_minimum_horizontal_distance_m',
+            'safety_transition_duration_s',
+            'safety_fallback_step_m',
             'hold_x',
             'hold_y',
             'hold_z',
@@ -582,6 +692,13 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         'following_lateral_spacing_m',
         LINE_ABREAST_LATERAL_SPACING_M,
     )
+    safety_minimum_horizontal_distance_m = float(
+        values.get('safety_minimum_horizontal_distance_m', 0.7)
+    )
+    safety_transition_duration_s = float(
+        values.get('safety_transition_duration_s', 1.0)
+    )
+    safety_fallback_step_m = float(values.get('safety_fallback_step_m', 0.3))
 
     if control_loop_hz <= 0.0:
         raise ValueError('control_loop_hz must be positive')
@@ -601,6 +718,12 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         raise ValueError('following_vee_trail_spacing_m must be positive')
     if following_line_abreast_lateral_spacing_m <= 0.0:
         raise ValueError('following_line_abreast_lateral_spacing_m must be positive')
+    if safety_minimum_horizontal_distance_m <= 0.0:
+        raise ValueError('safety_minimum_horizontal_distance_m must be positive')
+    if safety_transition_duration_s <= 0.0:
+        raise ValueError('safety_transition_duration_s must be positive')
+    if safety_fallback_step_m <= 0.0:
+        raise ValueError('safety_fallback_step_m must be positive')
 
     config = VehicleNodeConfig(
         role=role,
@@ -625,6 +748,9 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         following_vee_lateral_spacing_m=following_vee_lateral_spacing_m,
         following_vee_trail_spacing_m=following_vee_trail_spacing_m,
         following_line_abreast_lateral_spacing_m=following_line_abreast_lateral_spacing_m,
+        safety_minimum_horizontal_distance_m=safety_minimum_horizontal_distance_m,
+        safety_transition_duration_s=safety_transition_duration_s,
+        safety_fallback_step_m=safety_fallback_step_m,
     )
     _validate_first_version_mapping(config)
     return config
@@ -675,6 +801,32 @@ def vehicle_id_to_uint8(vehicle_id: str) -> int:
     if value < 0 or value > 255:
         raise ValueError(f'vehicle_id must fit uint8: {vehicle_id}')
     return value
+
+
+def _vehicle_state_observation(state, expected_vehicle_id: str):
+    if state is None or state.vehicle_id != expected_vehicle_id:
+        return None
+    return VehicleObservation(
+        vehicle_id=vehicle_id_to_uint8(expected_vehicle_id),
+        x=state.position[0],
+        y=state.position[1],
+        z=state.position[2],
+        yaw=state.yaw,
+        telemetry_age_s=state.telemetry_age_s,
+    )
+
+
+def _swarm_status_observation(status: SwarmVehicleStatus | None):
+    if status is None:
+        return None
+    return VehicleObservation(
+        vehicle_id=int(status.vehicle_id),
+        x=status.x,
+        y=status.y,
+        z=status.z,
+        yaw=status.yaw,
+        telemetry_age_s=status.last_telemetry_age_sec,
+    )
 
 
 def _target_system_for_values(values: Dict[str, Any]) -> int:

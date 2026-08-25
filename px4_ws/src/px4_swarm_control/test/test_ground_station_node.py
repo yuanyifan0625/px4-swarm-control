@@ -261,6 +261,7 @@ def test_takeoff_action_result_times_out_when_staging_never_completes():
 
 def test_move_leader_action_publishes_world_frame_leader_goal_without_follower_targets():
     core, publishers, _ = make_core()
+    publish_safe_following_statuses(core)
     request = MoveLeader.Goal()
     request.x = 1.0
     request.y = 2.0
@@ -284,8 +285,50 @@ def test_move_leader_action_publishes_world_frame_leader_goal_without_follower_t
     assert publishers.vehicle_setpoints[3].messages == []
 
 
+def test_move_leader_rejects_goal_too_close_to_actual_follower_with_reason():
+    core, publishers, _ = make_core()
+    core.handle_vehicle_status(
+        vehicle_status(1, x=0.0, y=0.0, slot='leader', vehicle_state='following')
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            2,
+            x=-1.0,
+            y=1.0,
+            slot='follower_left',
+            vehicle_state='following',
+        )
+    )
+    core.handle_vehicle_status(
+        vehicle_status(
+            3,
+            x=-1.0,
+            y=-1.0,
+            slot='follower_right',
+            vehicle_state='following',
+        )
+    )
+    request = MoveLeader.Goal()
+    request.x = -1.1
+    request.y = 1.0
+    request.z = -5.0
+    request.yaw = 0.0
+    request.position_tolerance_m = 0.5
+    request.yaw_tolerance_rad = 0.2
+    request.timeout_sec = 12.0
+
+    feedback = core.start_move_leader(request)
+    result = core.move_leader_result()
+
+    assert feedback.current_state == 'idle'
+    assert result.success is False
+    assert 'MAV2 actual position' in result.message
+    assert publishers.leader_goal.messages == []
+
+
 def test_move_leader_result_requires_fresh_leader_status_within_tolerance():
     core, _, _ = make_core()
+    publish_safe_following_statuses(core)
     request = MoveLeader.Goal()
     request.x = 1.0
     request.y = 2.0
@@ -349,6 +392,7 @@ def test_move_leader_result_requires_fresh_leader_status_within_tolerance():
 
 def test_move_leader_result_requires_leader_armed_and_offboard():
     core, _, _ = make_core()
+    publish_safe_following_statuses(core)
     request = MoveLeader.Goal()
     request.x = 1.0
     request.y = 2.0
@@ -433,6 +477,7 @@ def test_move_leader_rejects_non_finite_goal_and_non_positive_tolerance():
 def test_move_leader_result_times_out_before_leader_reaches_goal():
     clock = [10.0]
     core, _, _ = make_core(now_s=lambda: clock[0])
+    publish_safe_following_statuses(core)
     request = MoveLeader.Goal()
     request.x = 1.0
     request.y = 2.0
@@ -452,6 +497,7 @@ def test_move_leader_result_times_out_before_leader_reaches_goal():
 
 def test_takeoff_and_land_clear_pending_move_leader_goal_republish():
     core, publishers, _ = make_core()
+    publish_safe_following_statuses(core)
     move = MoveLeader.Goal()
     move.x = 1.0
     move.y = 2.0
@@ -471,6 +517,7 @@ def test_takeoff_and_land_clear_pending_move_leader_goal_republish():
 
     assert len(publishers.leader_goal.messages) == 1
 
+    publish_safe_following_statuses(core)
     core.start_move_leader(move)
     assert len(publishers.leader_goal.messages) == 2
 
@@ -744,6 +791,7 @@ def test_pause_action_publishes_pause_or_resume_mission_command():
 
 def test_resume_clears_old_move_and_formation_without_republishing_stale_commands():
     core, publishers, _ = make_core()
+    publish_safe_following_statuses(core)
     move = MoveLeader.Goal()
     move.x = 4.0
     move.y = 0.0
@@ -1161,6 +1209,24 @@ def publish_staged_statuses(core):
         status.last_telemetry_age_sec = 0.1
         status.vehicle_state = 'staging'
         core.handle_vehicle_status(status)
+
+
+def publish_safe_following_statuses(core):
+    for vehicle_id, point, slot in (
+        (1, (0.0, 0.0, -5.0), 'leader'),
+        (2, (-1.0, 1.0, -5.0), 'follower_left'),
+        (3, (-1.0, -1.0, -5.0), 'follower_right'),
+    ):
+        core.handle_vehicle_status(
+            vehicle_status(
+                vehicle_id,
+                x=point[0],
+                y=point[1],
+                z=point[2],
+                slot=slot,
+                vehicle_state='following',
+            )
+        )
 
 
 def vehicle_status(
