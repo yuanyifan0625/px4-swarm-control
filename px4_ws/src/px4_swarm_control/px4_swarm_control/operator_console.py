@@ -14,6 +14,7 @@ from rclpy.node import Node
 from rclpy.utilities import remove_ros_args
 
 from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES
+from px4_swarm_control.frame_transform import field_delta_to_ned_delta
 from px4_swarm_control.geometry import (
     body_offset_to_world,
     formation_body_offset,
@@ -192,19 +193,16 @@ class ConsoleCommandDispatcher:
             return ConsoleActionResult(False, 'leader status unavailable for relative command')
 
         x, y, z, yaw = leader.x, leader.y, leader.z, leader.yaw
-        if command == '2':
-            x += self._config.move_step_x_m
-        elif command == 'x':
-            x -= self._config.move_step_x_m
-        elif command == '3':
-            y += self._config.move_step_y_m
-        elif command == 'y':
-            y -= self._config.move_step_y_m
-        elif command == '4':
-            z -= self._config.altitude_step_m
-        elif command == 'z':
-            z += self._config.altitude_step_m
-        elif command == '5':
+        field_x, field_y, field_up = _field_delta_for_command(command, self._config)
+        ned_x, ned_y, ned_z = field_delta_to_ned_delta(
+            field_x=field_x,
+            field_y=field_y,
+            field_up=field_up,
+        )
+        x += ned_x
+        y += ned_y
+        z += ned_z
+        if command == '5':
             yaw = _normalize_yaw_rad(yaw + self._config.yaw_step_rad)
         elif command == 'c':
             yaw = _normalize_yaw_rad(yaw - self._config.yaw_step_rad)
@@ -588,6 +586,26 @@ def main(args: Iterable[str] | None = None) -> None:
         rclpy.shutdown()
 
 
+def _field_delta_for_command(
+    command: str,
+    config: OperatorConsoleConfig,
+) -> tuple[float, float, float]:
+    """Return a jog in the operator's fixed field frame (X forward, Y left, up)."""
+    if command == '2':
+        return config.move_step_x_m, 0.0, 0.0
+    if command == 'x':
+        return -config.move_step_x_m, 0.0, 0.0
+    if command == '3':
+        return 0.0, config.move_step_y_m, 0.0
+    if command == 'y':
+        return 0.0, -config.move_step_y_m, 0.0
+    if command == '4':
+        return 0.0, 0.0, config.altitude_step_m
+    if command == 'z':
+        return 0.0, 0.0, -config.altitude_step_m
+    return 0.0, 0.0, 0.0
+
+
 def _normalize_yaw_rad(yaw: float) -> float:
     while yaw > pi:
         yaw -= 2.0 * pi
@@ -606,12 +624,12 @@ def _help_text() -> str:
         '  h: help\n'
         '  0: ArmSwarm without takeoff\n'
         '  1: TakeoffSwarm\n'
-        '  2: move leader world x + step\n'
-        '  x: move leader world x - step\n'
-        '  3: move leader world y + step\n'
-        '  y: move leader world y - step\n'
-        '  4: move leader up by altitude step (NED z -= step)\n'
-        '  z: move leader down by altitude step (NED z += step)\n'
+        '  2: move leader field +X step (field X -> NED +Y)\n'
+        '  x: move leader field -X step (field -X -> NED -Y)\n'
+        '  3: move leader field +Y step (field Y -> NED +X)\n'
+        '  y: move leader field -Y step (field -Y -> NED -X)\n'
+        '  4: move leader field up by altitude step (NED z -= step)\n'
+        '  z: move leader field down by altitude step (NED z += step)\n'
         '  5: rotate leader yaw + step\n'
         '  c: rotate leader yaw - step\n'
         '  6: ChangeFormation vee\n'

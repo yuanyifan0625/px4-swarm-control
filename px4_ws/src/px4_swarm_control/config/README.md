@@ -5,6 +5,42 @@ Final manual verification guides:
 - `final_sitl_manual_smoke.zh.md`: SITL/manual ROS 2 smoke flow from inside the container.
 - `final_real_vehicle_ros2_manual.zh.md`: real-vehicle ROS 2 deployment and operation guide.
 
+## PX4 speed profile preflight
+
+ROS 2 does not rate-limit position setpoints. Before SITL or real-vehicle
+control, use PX4's position-controller parameters to enforce the agreed limits:
+
+- `MPC_XY_VEL_MAX=0.3 m/s`
+- `MPC_Z_VEL_MAX_UP=0.3 m/s`
+- `MPC_YAWRAUTO_MAX=30 deg/s`
+
+The profiles intentionally omit `MPC_Z_VEL_MAX_DN`, so the already-verified
+PX4 descent limit remains unchanged. With no live PX4 parameter client, this
+command prints the `param show` commands to paste into each MAV's PX4 shell:
+
+```bash
+ros2 run px4_swarm_control px4_speed_profile check --profile slow_demo
+```
+
+To compare values copied into a YAML file, run:
+
+```bash
+ros2 run px4_swarm_control px4_speed_profile check \
+  --profile slow_demo \
+  --current-values /path/to/current_px4_speed_values.yaml
+```
+
+Each row reports `current`, `desired`, and `match` for MAV1–MAV3. A missing
+vehicle or parameter is reported as `current=missing match=no`.
+
+`apply` only prints commands for manual execution in each PX4 shell. It does
+not change PX4 through ROS 2, and it refuses to generate `param set` commands
+without explicit confirmation:
+
+```bash
+ros2 run px4_swarm_control px4_speed_profile apply --profile slow_demo --yes
+```
+
 ## Ticket 05b live PX4 Gz bridge smoke flow
 
 PX4 SITL, Gazebo, and Micro XRCE-DDS Agent are external prerequisites for the

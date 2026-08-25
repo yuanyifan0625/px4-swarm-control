@@ -222,7 +222,7 @@ def test_non_movement_commands_reuse_existing_swarm_action_flow():
         ('change_formation', 'vee', 60.0),
         ('move_leader', 1.0, 2.0, -1.5, 0.5, 0.3, 0.2, 60.0),
         ('change_formation', 'line_abreast', 60.0),
-        ('settle', 'line_abreast', 1.5, 30.0, 0.10, 0.25),
+            ('settle', 'line_abreast', 1.5, 30.0, 0.02, 0.25),
         ('land', 60.0),
     ]
 
@@ -281,7 +281,7 @@ def test_demo_macro_movement_uses_field_frame_mapping():
     assert gateway.calls == [
         ('takeoff', 1.5, 60.0),
         ('move_leader', 0.0, 1.0, -1.5, 0.0, 0.3, 0.2, 60.0),
-        ('settle', 'vee', 1.5, 30.0, 0.10, 0.25),
+            ('settle', 'vee', 1.5, 30.0, 0.02, 0.25),
         ('land', 60.0),
     ]
 

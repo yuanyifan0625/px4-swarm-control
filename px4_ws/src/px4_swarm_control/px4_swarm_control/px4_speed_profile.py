@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from math import isfinite
 from numbers import Real
 from pathlib import Path
 from typing import Iterable, Mapping, Protocol
@@ -16,17 +17,14 @@ except ImportError:  # pragma: no cover - only used when running outside ROS ins
     get_package_share_directory = None
 
 
-SUPPORTED_PX4_SPEED_PARAMS = frozenset(
+REQUIRED_PX4_SPEED_PARAMS = frozenset(
     {
         'MPC_XY_VEL_MAX',
         'MPC_Z_VEL_MAX_UP',
-        'MPC_Z_VEL_MAX_DN',
-        'MPC_ACC_HOR',
-        'MPC_JERK_AUTO',
         'MPC_YAWRAUTO_MAX',
-        'MPC_YAWRAUTO_ACC',
     }
 )
+SUPPORTED_PX4_SPEED_PARAMS = REQUIRED_PX4_SPEED_PARAMS
 DEFAULT_VEHICLE_IDS = ('MAV1', 'MAV2', 'MAV3')
 
 
@@ -97,11 +95,21 @@ def validate_speed_profile(profile: Px4SpeedProfile) -> None:
     if not profile.parameters:
         raise ValueError('speed profile must define at least one parameter')
 
+    missing_parameters = REQUIRED_PX4_SPEED_PARAMS.difference(profile.parameters)
+    if missing_parameters:
+        missing = ', '.join(sorted(missing_parameters))
+        raise ValueError(f'missing required PX4 speed parameters: {missing}')
+
     for parameter_name, value in profile.parameters.items():
         if parameter_name not in SUPPORTED_PX4_SPEED_PARAMS:
             raise ValueError(f'unsupported PX4 speed parameter: {parameter_name}')
         if not isinstance(value, Real):
             raise ValueError(f'PX4 speed parameter must be numeric: {parameter_name}')
+        if not isfinite(float(value)) or float(value) <= 0.0:
+            raise ValueError(
+                f'PX4 speed parameter must be finite and greater than zero: '
+                f'{parameter_name}'
+            )
 
 
 def load_current_values(path: str | Path) -> dict[str, dict[str, float]]:
@@ -139,10 +147,17 @@ def check_profile(
 def diff_profile(
     profile: Px4SpeedProfile,
     current_values_by_vehicle: Mapping[str, Mapping[str, float]],
+    *,
+    vehicle_ids: Iterable[str] | None = None,
 ) -> list[Px4ParameterDiff]:
     rows: list[Px4ParameterDiff] = []
-    for vehicle_id in sorted(current_values_by_vehicle):
-        current_values = current_values_by_vehicle[vehicle_id]
+    report_vehicle_ids = (
+        sorted(set(vehicle_ids))
+        if vehicle_ids is not None
+        else sorted(current_values_by_vehicle)
+    )
+    for vehicle_id in report_vehicle_ids:
+        current_values = current_values_by_vehicle.get(vehicle_id, {})
         for parameter_name, desired_value in profile.parameters.items():
             current_value = current_values.get(parameter_name)
             rows.append(
@@ -263,7 +278,11 @@ def main(args: Iterable[str] | None = None) -> int:
 
     if parsed.mode == 'check':
         if parsed.current_values:
-            rows = diff_profile(profile, load_current_values(parsed.current_values))
+            rows = diff_profile(
+                profile,
+                load_current_values(parsed.current_values),
+                vehicle_ids=vehicle_ids,
+            )
             print(render_diff_report(rows))
             return 0
         print('目前沒有 live PX4 parameter client；請把下列 param show 指令貼到各 PX4 shell 檢查。')

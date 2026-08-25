@@ -120,7 +120,7 @@ def test_swarm_launch_uses_three_vehicle_yaml_as_parameter_source():
     ] == ['leader', 'follower_left', 'follower_right']
     assert [
         plain_node_parameters(node)['px4_target_system'] for node in vehicle_nodes
-    ] == [2, 3, 4]
+    ] == [1, 2, 3]
 
 
 def test_real_vehicle_launches_start_one_vehicle_node_each():

@@ -4,17 +4,17 @@ MAV1:
     role: leader
     vehicle_id: MAV1
     px4_namespace: /MAV1
-    px4_target_system: 2
+    px4_target_system: 1
     slot: leader
     control_loop_hz: 20.0
     status_loop_hz: 5.0
     telemetry_timeout_s: 0.5
-    following_vee_lateral_spacing_m: 0.8
-    following_vee_trail_spacing_m: 0.8
-    following_line_abreast_lateral_spacing_m: 0.8
+    following_vee_lateral_spacing_m: 1.0
+    following_vee_trail_spacing_m: 1.0
+    following_line_abreast_lateral_spacing_m: 1.0
     hold_x: 0.0
     hold_y: 0.0
-    hold_z: -2.0
+    hold_z: -1.0
     hold_yaw: 0.0
 
 MAV2:
@@ -22,17 +22,17 @@ MAV2:
     role: follower
     vehicle_id: MAV2
     px4_namespace: /MAV2
-    px4_target_system: 3
+    px4_target_system: 2
     slot: follower_left
     control_loop_hz: 20.0
     status_loop_hz: 5.0
     telemetry_timeout_s: 0.5
-    following_vee_lateral_spacing_m: 0.8
-    following_vee_trail_spacing_m: 0.8
-    following_line_abreast_lateral_spacing_m: 0.8
+    following_vee_lateral_spacing_m: 1.0
+    following_vee_trail_spacing_m: 1.0
+    following_line_abreast_lateral_spacing_m: 1.0
     hold_x: 0.0
     hold_y: 0.0
-    hold_z: -2.0
+    hold_z: -1.0
     hold_yaw: 0.0
 
 MAV3:
@@ -40,27 +40,27 @@ MAV3:
     role: follower
     vehicle_id: MAV3
     px4_namespace: /MAV3
-    px4_target_system: 4
+    px4_target_system: 3
     slot: follower_right
     control_loop_hz: 20.0
     status_loop_hz: 5.0
     telemetry_timeout_s: 0.5
-    following_vee_lateral_spacing_m: 0.8
-    following_vee_trail_spacing_m: 0.8
-    following_line_abreast_lateral_spacing_m: 0.8
+    following_vee_lateral_spacing_m: 1.0
+    following_vee_trail_spacing_m: 1.0
+    following_line_abreast_lateral_spacing_m: 1.0
     hold_x: 0.0
     hold_y: 0.0
-    hold_z: -2.0
+    hold_z: -1.0
     hold_yaw: 0.0
 
 ground_station_node:
   ros__parameters:
-    staging_lateral_spacing_m: 0.8
-    staging_trail_spacing_m: 0.8
+    staging_lateral_spacing_m: 1.0
+    staging_trail_spacing_m: 1.0
     staging_position_tolerance_m: 0.02
-    formation_vee_lateral_spacing_m: 0.8
-    formation_vee_trail_spacing_m: 0.8
-    formation_line_abreast_lateral_spacing_m: 0.8
+    formation_vee_lateral_spacing_m: 1.0
+    formation_vee_trail_spacing_m: 1.0
+    formation_line_abreast_lateral_spacing_m: 1.0
     formation_position_tolerance_m: 0.02
     formation_yaw_tolerance_rad: 0.1
     telemetry_fresh_timeout_s: 1.0

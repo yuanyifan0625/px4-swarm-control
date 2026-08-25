@@ -111,11 +111,11 @@ def test_parse_vehicle_node_config_accepts_leader_and_follower_values():
 
     assert leader.role is VehicleRole.LEADER
     assert leader.slot is Slot.LEADER
-    assert leader.px4_target_system == 2
+    assert leader.px4_target_system == 1
     assert leader.hold_setpoint == PositionYawSetpoint(1.0, 2.0, -3.0, 0.5)
     assert follower.role is VehicleRole.FOLLOWER
     assert follower.px4_namespace == '/MAV2'
-    assert follower.px4_target_system == 3
+    assert follower.px4_target_system == 2
     assert follower.slot is Slot.FOLLOWER_LEFT
 
 
@@ -159,9 +159,9 @@ def test_default_vehicle_node_configs_match_first_version_three_vehicle_layout()
         )
         for config in configs
     ] == [
-        ('MAV1', '/MAV1', 2, VehicleRole.LEADER, Slot.LEADER),
-        ('MAV2', '/MAV2', 3, VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
-        ('MAV3', '/MAV3', 4, VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
+        ('MAV1', '/MAV1', 1, VehicleRole.LEADER, Slot.LEADER),
+        ('MAV2', '/MAV2', 2, VehicleRole.FOLLOWER, Slot.FOLLOWER_LEFT),
+        ('MAV3', '/MAV3', 3, VehicleRole.FOLLOWER, Slot.FOLLOWER_RIGHT),
     ]
 
 
@@ -255,7 +255,7 @@ def test_follower_left_derives_vee_setpoint_from_fresh_leader_status():
 
     assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(9.3072, 20.4, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 21.0, -5.0, 0.0),
     ]
 
 
@@ -271,7 +271,7 @@ def test_follower_right_derives_vee_setpoint_from_fresh_leader_status():
 
     assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(9.3072, 19.6, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 19.0, -5.0, 0.0),
     ]
 
 
@@ -289,7 +289,7 @@ def test_follower_uses_current_formation_mode_topic_for_local_offset():
     core.control_tick()
 
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(9.3072, 20.4, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 21.0, -5.0, 0.0),
     ]
 
 
@@ -307,7 +307,7 @@ def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
     core.control_tick()
 
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(10.0, 20.8, -5.0, 0.0),
+        PositionYawSetpoint(10.0, 21.0, -5.0, 0.0),
     ]
 
 
@@ -428,7 +428,7 @@ def test_follower_pause_resume_waits_for_fresh_following_leader_before_following
 
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(9.3072, 20.4, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 21.0, -5.0, 0.0),
     ]
     assert px4_interface.safe_hover_calls >= 1
 
