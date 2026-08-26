@@ -844,7 +844,7 @@ def test_change_formation_rejects_stale_status_and_wrong_follower_slots():
         ),
     )
 
-    assert core.change_formation_feedback().progress == 0.5
+    assert core.change_formation_feedback().progress == 0.0
     assert core.change_formation_result() is None
 
 

@@ -131,7 +131,7 @@ def test_body_frame_following_rotates_with_current_leader_yaw():
 
     assert_setpoint_close(
         left_world,
-        PositionYawSetpoint(x=11.0, y=21.0, z=-5.0, yaw=-pi / 2.0),
+        PositionYawSetpoint(x=9.0, y=21.0, z=-5.0, yaw=-pi / 2.0),
     )
 
 

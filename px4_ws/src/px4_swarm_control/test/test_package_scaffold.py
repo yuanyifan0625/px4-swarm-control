@@ -9,29 +9,11 @@ from px4_swarm_control.package_info import (
 )
 
 
-def read_final_sitl_smoke_doc() -> str:
-    smoke_doc = (
-        Path(__file__).parents[1]
-        / 'config'
-        / 'final_sitl_manual_smoke.zh.md'
-    )
-    return smoke_doc.read_text()
-
-
-def read_final_real_vehicle_doc() -> str:
-    smoke_doc = (
-        Path(__file__).parents[1]
-        / 'config'
-        / 'final_real_vehicle_ros2_manual.zh.md'
-    )
-    return smoke_doc.read_text()
-
-
-def read_final_operator_console_manual() -> str:
+def read_final_manual() -> str:
     manual = (
         Path(__file__).parents[1]
         / 'config'
-        / 'final_operator_console_sitl_real_manual.zh.md'
+        / 'FINAL_MANUAL.zh.md'
     )
     return manual.read_text()
 
@@ -61,13 +43,10 @@ def test_namespace_scaffold_uses_role_independent_vehicle_names():
     assert VEHICLE_NAMESPACES == ("/MAV1", "/MAV2", "/MAV3")
 
 
-def test_config_readme_routes_all_manual_operation_to_unified_console_guide():
-    readme = Path(__file__).parents[1] / 'config' / 'README.md'
-    text = readme.read_text()
+def test_config_installs_one_final_manual_only():
+    config = Path(__file__).parents[1] / 'config'
 
-    assert 'final_operator_console_sitl_real_manual.zh.md' in text
-    assert '`operator_console` is the only installed manual' in text
-    assert 'px4_speed_profile check --profile slow_demo' in text
+    assert sorted(path.name for path in config.glob('*.md')) == ['FINAL_MANUAL.zh.md']
 
 
 def test_three_vehicle_config_file_names_fixed_namespace_layout():
@@ -83,61 +62,6 @@ def test_three_vehicle_config_file_names_fixed_namespace_layout():
     assert 'slot: follower_right' in text
 
 
-def test_final_sitl_smoke_doc_describes_external_runtime_launch_and_console():
-    text = read_final_sitl_smoke_doc()
-
-    assert 'MicroXRCEAgent udp4 -p 8888' in text
-    assert 'PX4_UXRCE_DDS_NS=MAV1' in text
-    assert 'PX4_UXRCE_DDS_NS=MAV2' in text
-    assert 'PX4_UXRCE_DDS_NS=MAV3' in text
-    assert 'ros2 launch px4_swarm_control swarm_nodes.launch.py' in text
-    assert 'formation_position_tolerance_m:=0.10' in text
-    assert 'ros2 run px4_swarm_control operator_console' in text
-    assert 'ros2 launch px4_swarm_control operator_console.launch.py' in text
-    assert 'settle_position_tolerance_m:=0.10' in text
-    assert 'settle_stable_duration_s:=1.5' in text
-    assert '9' in text
-    assert 'x' in text
-    assert 'y' in text
-    assert 'z' in text
-    assert 'c' in text
-    assert '/swarm/arm' in text
-    assert '/MAV1/status' in text
-    assert '/MAV2/status' in text
-    assert '/MAV3/status' in text
-    assert 'vehicle_state: landed' in text
-    assert 'armed: false' in text
-
-
-def test_final_sitl_smoke_doc_uses_in_container_commands():
-    text = read_final_sitl_smoke_doc()
-
-    assert 'docker compose exec ros2_jazzy bash -lc' not in text
-    assert '已經進入 container' in text
-    assert '/home/ncrl/docker_ubuntu24' in text
-    assert 'cd /home/ncrl/docker_ubuntu24/px4_ws' in text
-
-
-def test_final_real_vehicle_doc_names_distributed_launches_and_mav_contract():
-    text = read_final_real_vehicle_doc()
-
-    assert 'real_mav1_vehicle.launch.py' in text
-    assert 'real_mav2_vehicle.launch.py' in text
-    assert 'real_mav3_vehicle.launch.py' in text
-    assert 'real_ground_station.launch.py' in text
-    assert 'formation_position_tolerance_m:=0.10' in text
-    assert 'ros2 run px4_swarm_control operator_console' in text
-    assert 'ros2 launch px4_swarm_control operator_console.launch.py' in text
-    assert 'settle_position_tolerance_m:=0.10' in text
-    assert 'settle_stable_duration_s:=1.5' in text
-    assert '0.12' in text
-    assert '0.15' in text
-    assert '/MAV1/fmu/out/vehicle_local_position_v1' in text
-    assert '/MAV2/fmu/out/vehicle_status_v1' in text
-    assert '/MAV3/fmu/out/vehicle_command_ack' in text
-    assert '/vehicle_1' in text
-
-
 def test_operator_console_is_the_only_installed_manual_control_entrypoint():
     setup_text = (Path(__file__).parents[1] / 'setup.py').read_text()
 
@@ -146,28 +70,21 @@ def test_operator_console_is_the_only_installed_manual_control_entrypoint():
     assert 'field_frame_console = ' not in setup_text
 
 
-def test_unified_operator_console_manual_covers_replayable_sitl_and_real_flow():
-    text = read_final_operator_console_manual()
+def test_final_manual_covers_fixed_sitl_baseline_and_takeoff_safety():
+    text = read_final_manual()
 
-    assert 'MicroXRCEAgent udp4 -p 8888 2>&1 | tee' in text
+    assert 'MicroXRCEAgent udp4 -p 8888' in text
     assert 'PX4_UXRCE_DDS_NS=MAV1' in text
-    assert "./build/px4_sitl_default/bin/px4 -i 0" in text
-    assert "PX4_GZ_MODEL_POSE='-1,-1,0'" in text
-    assert "./build/px4_sitl_default/bin/px4 -i 1" in text
+    assert "./build/px4_sitl_default/bin/px4 -d -i 0" in text
     assert "PX4_GZ_MODEL_POSE='-1,1,0'" in text
-    assert "./build/px4_sitl_default/bin/px4 -i 2" in text
+    assert "./build/px4_sitl_default/bin/px4 -d -i 1" in text
+    assert "PX4_GZ_MODEL_POSE='-1,-1,0'" in text
+    assert "./build/px4_sitl_default/bin/px4 -d -i 2" in text
+    assert 'GZ_IP=127.0.0.1' in text
     assert 'param set NAV_DLL_ACT 0' in text
-    assert 'px4_speed_profile check --profile slow_demo' in text
     assert 'ros2 launch px4_swarm_control swarm_nodes.launch.py' in text
     assert 'ros2 run px4_swarm_control operator_console' in text
-    assert 'takeoff -> VEE staging -> leader movement -> formation change' in text
-    assert 'safety hold -> resume -> land' in text
-    assert '不重啟 Gazebo、PX4、DDS Agent 或 swarm nodes' in text
-    assert 'real_mav1_vehicle.launch.py' in text
-    assert 'real_mav2_vehicle.launch.py' in text
-    assert 'real_mav3_vehicle.launch.py' in text
-    assert 'real_ground_station.launch.py' in text
     assert '/MAV1/fmu/out/vehicle_local_position_v1' in text
     assert '/MAV1/status' in text
-    assert 'vehicle_state: landed' in text
-    assert 'armed: false' in text
+    assert 'command 22' in text
+    assert 'fresh staging anchor' in text

@@ -22,6 +22,7 @@ def expected_px4_instance_commands() -> tuple[str, str, str]:
     commands = []
     for vehicle in FIRST_VERSION_VEHICLES:
         env = [
+            'GZ_IP=127.0.0.1',
             'PX4_GZ_NO_FOLLOW=1',
             f'PX4_UXRCE_DDS_NS={vehicle.namespace.lstrip("/")}',
             'PX4_SYS_AUTOSTART=4001',

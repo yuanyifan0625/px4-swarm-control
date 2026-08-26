@@ -1,6 +1,8 @@
 from math import isnan
 from types import SimpleNamespace
 
+import pytest
+
 from px4_msgs.msg import (
     FailsafeFlags,
     OffboardControlMode,
@@ -178,6 +180,39 @@ def test_local_position_ready_requires_fresh_valid_finite_non_dead_reckoning_pos
 
     local_position.z_valid = True
     local_position.heading = float('nan')
+    assert interface.local_position_ready() is False
+
+
+@pytest.mark.parametrize(
+    ('attribute', 'value'),
+    [
+        ('x', float('nan')),
+        ('y', float('inf')),
+        ('z', float('-inf')),
+        ('heading', float('inf')),
+        ('xy_valid', False),
+        ('z_valid', False),
+        ('dead_reckoning', True),
+        ('timestamp', 900_000),
+    ],
+)
+def test_local_position_ready_rejects_each_required_invalid_combination(
+    attribute,
+    value,
+):
+    interface = make_interface(now_us=1_500_000)
+    local_position = VehicleLocalPosition()
+    local_position.timestamp = 1_200_000
+    local_position.x = 1.0
+    local_position.y = 2.0
+    local_position.z = -3.0
+    local_position.heading = 0.5
+    local_position.xy_valid = True
+    local_position.z_valid = True
+    local_position.dead_reckoning = False
+    setattr(local_position, attribute, value)
+    interface.handle_vehicle_local_position(local_position)
+
     assert interface.local_position_ready() is False
 
 

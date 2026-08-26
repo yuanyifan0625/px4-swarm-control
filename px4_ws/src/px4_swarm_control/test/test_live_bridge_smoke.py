@@ -15,16 +15,17 @@ def test_expected_px4_instance_commands_keep_vehicle_namespaces_and_safe_spacing
 
     assert all(' -s ' not in command for command in commands)
     assert all('PX4_GZ_NO_FOLLOW=1' in command for command in commands)
+    assert all('GZ_IP=127.0.0.1' in command for command in commands)
     assert 'PX4_UXRCE_DDS_NS=MAV1' in commands[0]
     assert 'PX4_GZ_STANDALONE=1' not in commands[0]
     assert './build/px4_sitl_default/bin/px4 -i 0' in commands[0]
     assert 'PX4_UXRCE_DDS_NS=MAV2' in commands[1]
     assert 'PX4_GZ_STANDALONE=1' in commands[1]
-    assert 'PX4_GZ_MODEL_POSE="-1,-1,0"' in commands[1]
+    assert 'PX4_GZ_MODEL_POSE="-1,1,0"' in commands[1]
     assert './build/px4_sitl_default/bin/px4 -i 1' in commands[1]
     assert 'PX4_UXRCE_DDS_NS=MAV3' in commands[2]
     assert 'PX4_GZ_STANDALONE=1' in commands[2]
-    assert 'PX4_GZ_MODEL_POSE="-1,1,0"' in commands[2]
+    assert 'PX4_GZ_MODEL_POSE="-1,-1,0"' in commands[2]
     assert './build/px4_sitl_default/bin/px4 -i 2' in commands[2]
 
 

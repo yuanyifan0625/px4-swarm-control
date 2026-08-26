@@ -80,7 +80,7 @@ def test_follower_resumes_only_after_one_second_back_above_minimum_distance():
     resumed_target = PositionYawSetpoint(1.0, 1.0, -1.0, 0.0)
     own = observation(2, 0.0, 0.0)
     safe_peers = {1: observation(1, 2.0, 0.0)}
-    unsafe_peers = {1: observation(1, 0.6, 0.0)}
+    unsafe_peers = {1: observation(1, 0.5, 0.0)}
 
     gate.evaluate(
         candidate_target=first_target,

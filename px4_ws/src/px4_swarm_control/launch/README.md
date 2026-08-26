@@ -10,7 +10,7 @@
 PX4 SITL, Gazebo, Micro XRCE-DDS Agent, QGC, `operator_console`, and PX4 speed
 profile commands are external workflow steps, not launch-file children.
 
-Use `config/final_operator_console_sitl_real_manual.zh.md` for their exact
+Use `config/FINAL_MANUAL.zh.md` for their exact
 startup order and the replayable two-cycle demo. `operator_console` is the
 only installed manual control entrypoint.
 

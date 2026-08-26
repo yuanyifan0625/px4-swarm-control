@@ -442,7 +442,8 @@ class VehicleNodeCore:
         )
 
     def _clear_takeoff_phase(self) -> None:
-        self._takeoff_phase = _TakeoffPhase.IDLE
+        if self._takeoff_phase is not _TakeoffPhase.IDLE:
+            self._set_takeoff_phase(_TakeoffPhase.IDLE)
         self._vertical_takeoff_setpoint = None
         self._pending_takeoff_until_staging = False
         self._offboard_warmup_started_s = None

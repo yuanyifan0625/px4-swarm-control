@@ -138,7 +138,7 @@ FIRST_VERSION_VEHICLES: Tuple[
         'x500_1',
         VehicleRole.FOLLOWER,
         Slot.FOLLOWER_LEFT,
-        '-1,-1,0',
+        '-1,1,0',
     ),
     VehicleBridgeExpectation(
         'MAV3',
@@ -149,7 +149,7 @@ FIRST_VERSION_VEHICLES: Tuple[
         'x500_2',
         VehicleRole.FOLLOWER,
         Slot.FOLLOWER_RIGHT,
-        '-1,1,0',
+        '-1,-1,0',
     ),
 )
 

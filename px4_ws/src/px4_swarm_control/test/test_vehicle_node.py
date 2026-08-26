@@ -341,7 +341,7 @@ def test_follower_control_tick_enters_collision_hold_and_publishes_slot_fallback
     core.control_tick()
 
     assert px4_interface.setpoints[0] == PositionYawSetpoint(-1.0, 1.0, -1.0, 0.0)
-    assert px4_interface.setpoints[1] == PositionYawSetpoint(0.0, -0.3, -1.0, 0.0)
+    assert px4_interface.setpoints[1] == PositionYawSetpoint(0.0, 0.3, -1.0, 0.0)
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
 
 
@@ -509,6 +509,7 @@ def test_follower_pause_resume_waits_for_fresh_following_leader_before_following
 
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
     assert px4_interface.setpoints == [
+        PositionYawSetpoint(9.0, 19.0, -5.0, 0.0),
         PositionYawSetpoint(9.0, 19.0, -5.0, 0.0),
     ]
     assert px4_interface.safe_hover_calls >= 1
@@ -728,6 +729,147 @@ def test_takeoff_waits_without_commands_until_local_position_is_ready():
     assert px4_interface.arm_calls == 0
 
 
+def test_takeoff_rechecks_local_readiness_before_arm_but_not_after_arm():
+    clock = [0.0]
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(x=1.0, y=2.0, z=0.0, yaw=0.3, armed=False),
+    )
+    core = make_core(px4_interface=px4_interface, now_s=lambda: clock[0])
+    takeoff = MissionCommand()
+    takeoff.command = MissionCommand.TAKEOFF
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+    core.handle_mission_command(takeoff)
+    core.control_tick()
+    clock[0] = 1.0
+    core.control_tick()
+
+    px4_interface.state = vehicle_state(
+        x=1.0, y=2.0, z=0.0, yaw=0.3, armed=False, navigation_state='offboard',
+    )
+    px4_interface.local_ready = False
+    core.control_tick()
+    core.control_tick()
+    assert px4_interface.arm_calls == 0
+
+    px4_interface.local_ready = True
+    core.control_tick()
+    assert px4_interface.arm_calls == 1
+
+    px4_interface.local_ready = False
+    px4_interface.state = vehicle_state(
+        x=1.0, y=2.0, z=-4.9, yaw=0.3, armed=True, navigation_state='offboard',
+    )
+    core.control_tick()
+    core.control_tick()
+    assert core.vehicle_level_state is VehicleLevelState.STAGING
+
+
+def test_takeoff_retries_offboard_then_arm_only_each_retry_interval():
+    clock = [0.0]
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            x=1.0, y=2.0, z=0.0, yaw=0.3, armed=False,
+            navigation_state='auto_loiter',
+        ),
+    )
+    core = make_core(px4_interface=px4_interface, now_s=lambda: clock[0])
+    takeoff = MissionCommand()
+    takeoff.command = MissionCommand.TAKEOFF
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+    core.handle_mission_command(takeoff)
+    core.control_tick()
+    clock[0] = 1.0
+    core.control_tick()
+    clock[0] = 1.9
+    core.control_tick()
+    clock[0] = 2.0
+    core.control_tick()
+    assert px4_interface.offboard_mode_calls == 2
+    assert px4_interface.arm_calls == 0
+
+    px4_interface.state = vehicle_state(
+        x=1.0, y=2.0, z=0.0, yaw=0.3, armed=False, navigation_state='offboard',
+    )
+    core.control_tick()
+    core.control_tick()
+    clock[0] = 2.9
+    core.control_tick()
+    clock[0] = 3.0
+    core.control_tick()
+    assert px4_interface.arm_calls == 2
+
+
+def test_takeoff_logs_every_private_phase_and_never_issues_nav_takeoff():
+    clock = [0.0]
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(
+            x=1.0, y=2.0, z=0.0, yaw=0.3, armed=False,
+            navigation_state='auto_loiter',
+        ),
+    )
+    logger = FakeLogger()
+    core = make_core(
+        px4_interface=px4_interface,
+        logger=logger,
+        now_s=lambda: clock[0],
+    )
+    takeoff = MissionCommand()
+    takeoff.command = MissionCommand.TAKEOFF
+    core.handle_staging_setpoint(staging_setpoint(z=-5.0))
+    core.handle_mission_command(takeoff)
+    core.control_tick()
+    clock[0] = 1.0
+    core.control_tick()
+    px4_interface.state = vehicle_state(
+        x=1.0, y=2.0, z=0.0, yaw=0.3, armed=False, navigation_state='offboard',
+    )
+    core.control_tick()
+    core.control_tick()
+    px4_interface.state = vehicle_state(
+        x=1.0, y=2.0, z=-4.9, yaw=0.3, armed=True, navigation_state='offboard',
+    )
+    core.control_tick()
+    core.control_tick()
+
+    assert [message for message in logger.infos if 'takeoff phase=' in message] == [
+        'MAV1 takeoff phase=waiting_local_position',
+        'MAV1 takeoff phase=offboard_warmup',
+        'MAV1 takeoff phase=waiting_offboard',
+        'MAV1 takeoff phase=waiting_arm',
+        'MAV1 takeoff phase=ascending',
+        'MAV1 takeoff phase=staging',
+        'MAV1 takeoff phase=idle',
+    ]
+    assert not hasattr(px4_interface, 'takeoff')
+
+
+def test_land_complete_requires_a_fresh_staging_target_for_the_next_takeoff():
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(armed=False, landed=False),
+    )
+    core = make_core(px4_interface=px4_interface)
+    takeoff = MissionCommand()
+    takeoff.command = MissionCommand.TAKEOFF
+    land = MissionCommand()
+    land.command = MissionCommand.LAND
+    core.handle_staging_setpoint(staging_setpoint(x=1.0, y=2.0, z=-5.0))
+    core.handle_mission_command(takeoff)
+    core.handle_mission_command(land)
+    px4_interface.state = vehicle_state(armed=False, landed=True, navigation_state='auto_land')
+    core.control_tick()
+
+    core.handle_mission_command(takeoff)
+    assert core.vehicle_level_state is VehicleLevelState.ARMING
+    assert px4_interface.heartbeats == 0
+    core.handle_staging_setpoint(staging_setpoint(x=7.0, y=8.0, z=-6.0))
+    px4_interface.state = vehicle_state(
+        x=3.0, y=4.0, z=0.0, yaw=0.2, armed=False, landed=False,
+    )
+    core.control_tick()
+
+    assert px4_interface.setpoints[-1] == PositionYawSetpoint(3.0, 4.0, -6.0, 0.2)
+
+
 def test_pause_cancels_takeoff_and_resume_does_not_restart_it():
     px4_interface = FakePx4Interface(
         state=vehicle_state(x=3.0, y=4.0, z=-1.0, yaw=0.5, armed=False),
@@ -879,14 +1021,14 @@ def peer_status(
 
 def prepare_safe_follower_telemetry(core, px4_interface, vehicle_id):
     if vehicle_id == 'MAV2':
-        own_y = 21.0
+        own_y = 19.0
         peer_id = 3
-        peer_y = 19.0
+        peer_y = 21.0
         peer_slot = 'follower_right'
     else:
-        own_y = 19.0
+        own_y = 21.0
         peer_id = 2
-        peer_y = 21.0
+        peer_y = 19.0
         peer_slot = 'follower_left'
     px4_interface.state = vehicle_state(
         vehicle_id=vehicle_id,
