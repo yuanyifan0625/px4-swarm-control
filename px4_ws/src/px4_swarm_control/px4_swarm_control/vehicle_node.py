@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from math import isfinite, nan
 from re import search
 from time import monotonic
@@ -58,15 +59,25 @@ class VehicleNodeConfig:
     control_loop_hz: float = 20.0
     status_loop_hz: float = 5.0
     telemetry_timeout_s: float = 0.5
-    takeoff_altitude_tolerance_m: float = 1.0
+    takeoff_altitude_tolerance_m: float = 0.1
     offboard_warmup_s: float = 1.0
-    offboard_mode_retry_s: float = 1.0
+    takeoff_command_retry_s: float = 1.0
     following_vee_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
     following_vee_trail_spacing_m: float = VEE_TRAIL_SPACING_M
     following_line_abreast_lateral_spacing_m: float = LINE_ABREAST_LATERAL_SPACING_M
     safety_minimum_horizontal_distance_m: float = 0.7
     safety_transition_duration_s: float = 1.0
     safety_fallback_step_m: float = 0.3
+
+
+class _TakeoffPhase(str, Enum):
+    IDLE = 'idle'
+    WAITING_LOCAL_POSITION = 'waiting_local_position'
+    OFFBOARD_WARMUP = 'offboard_warmup'
+    WAITING_OFFBOARD = 'waiting_offboard'
+    WAITING_ARM = 'waiting_arm'
+    ASCENDING = 'ascending'
+    STAGING = 'staging'
 
 
 class VehicleNodeCore:
@@ -104,13 +115,12 @@ class VehicleNodeCore:
         self._leader_goal_active = False
         self._warned_ignored_leader_goal = False
         self._warned_mismatched_vehicle_state = False
-        self._takeoff_to_staging_active = False
-        self._takeoff_command_sent_for_staging = False
+        self._takeoff_phase = _TakeoffPhase.IDLE
         self._pending_takeoff_until_staging = False
         self._staging_setpoint_received = False
-        self._last_takeoff_command_request_s: Optional[float] = None
+        self._vertical_takeoff_setpoint: Optional[PositionYawSetpoint] = None
         self._offboard_warmup_started_s: Optional[float] = None
-        self._last_offboard_mode_request_s: Optional[float] = None
+        self._last_takeoff_command_request_s: Optional[float] = None
         self._land_complete_recovery_sent = False
         self._sync_interface_state()
 
@@ -158,11 +168,13 @@ class VehicleNodeCore:
     def handle_staging_setpoint(self, msg: VehicleSetpoint) -> None:
         if int(msg.vehicle_id) != vehicle_id_to_uint8(self.config.vehicle_id):
             return
+        if self.vehicle_level_state is VehicleLevelState.LANDING:
+            return
         # 只接受自己的 staging 目標，保護多機共用 topic 流程下不追錯飛機位置。
         self.active_setpoint = PositionYawSetpoint(msg.x, msg.y, msg.z, msg.yaw)
         self._leader_goal_active = False
         self._staging_setpoint_received = True
-        if not self._takeoff_to_staging_active:
+        if self._takeoff_phase is _TakeoffPhase.IDLE:
             self.transition_to(VehicleLevelState.STAGING, 'staging setpoint accepted')
         if self._pending_takeoff_until_staging:
             self._pending_takeoff_until_staging = False
@@ -178,30 +190,25 @@ class VehicleNodeCore:
             return
         if msg.command == MissionCommand.LAND:
             self._leader_goal_active = False
-            self._takeoff_to_staging_active = False
-            self._takeoff_command_sent_for_staging = False
+            self._clear_takeoff_phase()
             self._pending_takeoff_until_staging = False
             self._land_complete_recovery_sent = False
             # 降落代表任務輪次結束，清掉 staging latch 以保護下一輪不吃上一輪目標。
             self._staging_setpoint_received = False
-            self._last_takeoff_command_request_s = None
             self.px4_interface.land()
             self.transition_to(VehicleLevelState.LANDING, 'land command accepted')
             return
         if msg.command == MissionCommand.PAUSE:
             self._leader_goal_active = False
+            self._pause_takeoff(state=self.px4_interface.vehicle_state())
+            self._staging_setpoint_received = False
             self.transition_to(VehicleLevelState.PAUSED, 'pause command accepted')
-            self.px4_interface.publish_safe_hover_setpoint()
             return
         if msg.command == MissionCommand.RESUME:
             self.transition_to(VehicleLevelState.HOLDING, 'resume command accepted')
 
     def _start_takeoff_without_qgc(self) -> None:
-        if self._takeoff_to_staging_active:
-            # TAKEOFF 會在 action 等待期間重送，這裡保護 PX4 不被重複 arm/takeoff 指令洗版。
-            return
-        if self._takeoff_command_sent_for_staging:
-            # 同一輪任務已送過 PX4 takeoff 後，忽略 retry 以保護起飛初期 landed telemetry 抖動不重啟流程。
+        if self._takeoff_phase is not _TakeoffPhase.IDLE:
             return
         if not self._staging_setpoint_received:
             # TAKEOFF 可能比 staging topic 先到，等待目標可避免用 hold altitude 起飛到錯高度。
@@ -212,15 +219,12 @@ class VehicleNodeCore:
                 'waiting for staging target',
             )
             return
-        self._takeoff_to_staging_active = True
+        self._takeoff_phase = _TakeoffPhase.WAITING_LOCAL_POSITION
+        self._vertical_takeoff_setpoint = None
         self._offboard_warmup_started_s = None
-        self._last_offboard_mode_request_s = None
-        self._send_takeoff_command_to_px4()
-        self.transition_to(VehicleLevelState.TAKING_OFF, 'takeoff command accepted')
-        self.logger.info(
-            '不依賴 QGC：先用 PX4 NAV_TAKEOFF 到安全高度，'
-            '再 warm up Offboard 後切換 staging control。',
-        )
+        self._last_takeoff_command_request_s = None
+        self.transition_to(VehicleLevelState.TAKING_OFF, 'waiting for local position')
+        self._log_takeoff_phase()
 
     def control_tick(self) -> None:
         state = self.px4_interface.vehicle_state()
@@ -234,7 +238,7 @@ class VehicleNodeCore:
             self.px4_interface.publish_offboard_heartbeat()
             self.px4_interface.publish_safe_hover_setpoint()
             return
-        if self._takeoff_to_staging_active:
+        if self._takeoff_phase is not _TakeoffPhase.IDLE:
             self._control_takeoff_to_staging(state)
             return
         if self._state_is_landed(state):
@@ -368,60 +372,96 @@ class VehicleNodeCore:
         return 0.0
 
     def _control_takeoff_to_staging(self, state) -> None:
-        if state is None or self.px4_interface.is_telemetry_stale():
+        if state is None:
             return
-        if self._offboard_accepted(state):
-            self._takeoff_to_staging_active = False
+        if not state.armed and not self.px4_interface.local_position_ready():
+            return
+        if self._takeoff_phase is _TakeoffPhase.WAITING_LOCAL_POSITION:
+            self._vertical_takeoff_setpoint = PositionYawSetpoint(
+                state.position[0], state.position[1], self.active_setpoint.z, state.yaw,
+            )
+            self._offboard_warmup_started_s = self._now_s()
+            self._set_takeoff_phase(_TakeoffPhase.OFFBOARD_WARMUP)
+
+        vertical_target = self._vertical_takeoff_setpoint
+        if vertical_target is None:
+            return
+        if self._takeoff_phase is _TakeoffPhase.OFFBOARD_WARMUP:
             self.px4_interface.publish_offboard_heartbeat()
-            self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
-            self.transition_to(VehicleLevelState.STAGING, 'PX4 accepted Offboard')
-            return
-        if not self._takeoff_altitude_reached(state):
-            self._retry_takeoff_if_still_grounded(state)
+            self.px4_interface.publish_position_yaw_setpoint(vertical_target)
+            if (
+                self._now_s() - self._offboard_warmup_started_s
+                < self.config.offboard_warmup_s
+            ):
+                return
+            self._set_takeoff_phase(_TakeoffPhase.WAITING_OFFBOARD)
+
+        if self._takeoff_phase is _TakeoffPhase.WAITING_OFFBOARD:
+            self.px4_interface.publish_offboard_heartbeat()
+            self.px4_interface.publish_position_yaw_setpoint(vertical_target)
+            if state.navigation_state == 'offboard':
+                self._set_takeoff_phase(_TakeoffPhase.WAITING_ARM)
+                self._last_takeoff_command_request_s = None
+            elif self._takeoff_command_due():
+                self.px4_interface.set_offboard_mode()
+                self._last_takeoff_command_request_s = self._now_s()
             return
 
-        # 高度達標後才連續送 heartbeat/setpoint，保護 PX4 Offboard 切換有足夠 warmup。
-        self.px4_interface.publish_offboard_heartbeat()
-        self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
-        now_s = self._now_s()
-        if self._offboard_warmup_started_s is None:
-            self._offboard_warmup_started_s = now_s
+        if self._takeoff_phase is _TakeoffPhase.WAITING_ARM:
+            self.px4_interface.publish_offboard_heartbeat()
+            self.px4_interface.publish_position_yaw_setpoint(vertical_target)
+            if state.armed:
+                self._set_takeoff_phase(_TakeoffPhase.ASCENDING)
+            elif self._takeoff_command_due():
+                self.px4_interface.arm()
+                self._last_takeoff_command_request_s = self._now_s()
             return
-        if now_s - self._offboard_warmup_started_s < self.config.offboard_warmup_s:
-            return
-        if (
-            self._last_offboard_mode_request_s is None
-            or now_s - self._last_offboard_mode_request_s
-            >= self.config.offboard_mode_retry_s
-        ):
-            self.px4_interface.set_offboard_mode()
-            self._last_offboard_mode_request_s = now_s
 
-    def _send_takeoff_command_to_px4(self) -> None:
-        # 先讓 PX4 自己管理起飛，保護 Offboard 不會在尚未離地時被太早拒絕。
-        self.px4_interface.arm()
-        self.px4_interface.takeoff(
-            altitude_m=abs(self.active_setpoint.z),
-            yaw=self.active_setpoint.yaw,
+        if self._takeoff_phase is _TakeoffPhase.ASCENDING:
+            self.px4_interface.publish_offboard_heartbeat()
+            self.px4_interface.publish_position_yaw_setpoint(vertical_target)
+            if self._takeoff_altitude_reached(state, vertical_target):
+                self._set_takeoff_phase(_TakeoffPhase.STAGING)
+                self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
+                self.transition_to(VehicleLevelState.STAGING, 'vertical takeoff complete')
+                self._clear_takeoff_phase()
+
+    def _takeoff_command_due(self) -> bool:
+        return self._last_takeoff_command_request_s is None or (
+            self._now_s() - self._last_takeoff_command_request_s
+            >= self.config.takeoff_command_retry_s
         )
-        self._takeoff_command_sent_for_staging = True
-        self._last_takeoff_command_request_s = self._now_s()
 
-    def _retry_takeoff_if_still_grounded(self, state) -> None:
-        if state.armed and not getattr(state, 'landed', False):
-            return
-        now_s = self._now_s()
-        if (
-            self._last_takeoff_command_request_s is not None
-            and now_s - self._last_takeoff_command_request_s
-            < self.config.offboard_mode_retry_s
-        ):
-            return
-        # PX4 在落地後可能短暫忽略第一個 takeoff，低頻重送保護一次 action 能完成。
-        self._send_takeoff_command_to_px4()
+    def _set_takeoff_phase(self, phase: _TakeoffPhase) -> None:
+        self._takeoff_phase = phase
+        self._log_takeoff_phase()
+
+    def _log_takeoff_phase(self) -> None:
+        self.logger.info(
+            f'{self.config.vehicle_id} takeoff phase={self._takeoff_phase.value}',
+        )
+
+    def _clear_takeoff_phase(self) -> None:
+        self._takeoff_phase = _TakeoffPhase.IDLE
+        self._vertical_takeoff_setpoint = None
+        self._pending_takeoff_until_staging = False
+        self._offboard_warmup_started_s = None
+        self._last_takeoff_command_request_s = None
+
+    def _pause_takeoff(self, state) -> None:
+        self._clear_takeoff_phase()
+        self.px4_interface.publish_offboard_heartbeat()
+        if state is not None and self.px4_interface.local_position_ready():
+            hold_target = PositionYawSetpoint(*state.position, state.yaw)
+            self.active_setpoint = hold_target
+            self.px4_interface.publish_position_yaw_setpoint(hold_target)
+        else:
+            self.px4_interface.publish_safe_hover_setpoint()
 
     def _transition_to_landed(self, state) -> None:
         self._run_land_complete_recovery(state)
+        self._clear_takeoff_phase()
+        self._staging_setpoint_received = False
         self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
 
     def _run_land_complete_recovery(self, state) -> None:
@@ -435,24 +475,15 @@ class VehicleNodeCore:
             f'{self.config.vehicle_id} LandCompleteRecovery requested GroundSafeMode',
         )
 
-    def _takeoff_altitude_reached(self, state) -> bool:
+    def _takeoff_altitude_reached(self, state, target) -> bool:
         return state.position[2] <= (
-            self.active_setpoint.z + self.config.takeoff_altitude_tolerance_m
+            target.z + self.config.takeoff_altitude_tolerance_m
         )
-
-    def _offboard_accepted(self, state) -> bool:
-        if state.navigation_state != 'offboard':
-            return False
-        if getattr(state, 'landed', False) and state.position[2] > -0.5:
-            # PX4 可能短暫回報 Offboard 但仍未離地，這裡保護 staging 不被 landed telemetry 打回。
-            return False
-        # Offboard 要等到起飛高度達標才承認，保護 staging 水平移動不在地面附近開始。
-        return self._takeoff_altitude_reached(state)
 
     def _state_is_landed(self, state) -> bool:
         if state is None or not getattr(state, 'landed', False):
             return False
-        if self._takeoff_to_staging_active:
+        if self._takeoff_phase is not _TakeoffPhase.IDLE:
             return False
         if state.armed and state.position[2] < -0.5:
             return False
@@ -619,9 +650,9 @@ class VehicleNode(Node):
         self.declare_parameter('control_loop_hz', 20.0)
         self.declare_parameter('status_loop_hz', 5.0)
         self.declare_parameter('telemetry_timeout_s', 0.5)
-        self.declare_parameter('takeoff_altitude_tolerance_m', 1.0)
+        self.declare_parameter('takeoff_altitude_tolerance_m', 0.1)
         self.declare_parameter('offboard_warmup_s', 1.0)
-        self.declare_parameter('offboard_mode_retry_s', 1.0)
+        self.declare_parameter('takeoff_command_retry_s', 1.0)
         self.declare_parameter('following_vee_lateral_spacing_m', VEE_LATERAL_SPACING_M)
         self.declare_parameter('following_vee_trail_spacing_m', VEE_TRAIL_SPACING_M)
         self.declare_parameter(
@@ -648,7 +679,7 @@ class VehicleNode(Node):
             'telemetry_timeout_s',
             'takeoff_altitude_tolerance_m',
             'offboard_warmup_s',
-            'offboard_mode_retry_s',
+            'takeoff_command_retry_s',
             'following_vee_lateral_spacing_m',
             'following_vee_trail_spacing_m',
             'following_line_abreast_lateral_spacing_m',
@@ -670,10 +701,10 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
     status_loop_hz = float(values.get('status_loop_hz', 5.0))
     telemetry_timeout_s = float(values.get('telemetry_timeout_s', 0.5))
     takeoff_altitude_tolerance_m = float(
-        values.get('takeoff_altitude_tolerance_m', 1.0),
+        values.get('takeoff_altitude_tolerance_m', 0.1),
     )
     offboard_warmup_s = float(values.get('offboard_warmup_s', 1.0))
-    offboard_mode_retry_s = float(values.get('offboard_mode_retry_s', 1.0))
+    takeoff_command_retry_s = float(values.get('takeoff_command_retry_s', 1.0))
     following_vee_lateral_spacing_m = _spacing_value(
         values,
         'following_vee_lateral_spacing_m',
@@ -710,8 +741,8 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         raise ValueError('takeoff_altitude_tolerance_m must be positive')
     if offboard_warmup_s <= 0.0:
         raise ValueError('offboard_warmup_s must be positive')
-    if offboard_mode_retry_s <= 0.0:
-        raise ValueError('offboard_mode_retry_s must be positive')
+    if takeoff_command_retry_s <= 0.0:
+        raise ValueError('takeoff_command_retry_s must be positive')
     if following_vee_lateral_spacing_m <= 0.0:
         raise ValueError('following_vee_lateral_spacing_m must be positive')
     if following_vee_trail_spacing_m <= 0.0:
@@ -744,7 +775,7 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         telemetry_timeout_s=telemetry_timeout_s,
         takeoff_altitude_tolerance_m=takeoff_altitude_tolerance_m,
         offboard_warmup_s=offboard_warmup_s,
-        offboard_mode_retry_s=offboard_mode_retry_s,
+        takeoff_command_retry_s=takeoff_command_retry_s,
         following_vee_lateral_spacing_m=following_vee_lateral_spacing_m,
         following_vee_trail_spacing_m=following_vee_trail_spacing_m,
         following_line_abreast_lateral_spacing_m=following_line_abreast_lateral_spacing_m,

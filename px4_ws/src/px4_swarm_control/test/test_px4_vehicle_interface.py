@@ -119,16 +119,11 @@ def test_publish_position_yaw_setpoint_maps_internal_model_to_px4_message():
     assert isnan(msg.yawspeed)
 
 
-def test_vehicle_commands_include_expected_command_ids_and_params():
+def test_vehicle_commands_never_publish_nav_takeoff():
     interface = make_interface(now_us=4000)
-    local_position = VehicleLocalPosition()
-    local_position.ref_alt = 125.5
-    local_position.z_global = True
-    interface.handle_vehicle_local_position(local_position)
 
     interface.arm()
     interface.disarm()
-    interface.takeoff(altitude_m=8.0, yaw=1.2)
     interface.land()
     interface.set_offboard_mode()
     interface.set_ground_safe_mode()
@@ -137,35 +132,53 @@ def test_vehicle_commands_include_expected_command_ids_and_params():
     assert [msg.command for msg in commands] == [
         VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM,
         VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM,
-        VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF,
         VehicleCommand.VEHICLE_CMD_NAV_LAND,
         VehicleCommand.VEHICLE_CMD_DO_SET_MODE,
         VehicleCommand.VEHICLE_CMD_DO_SET_MODE,
     ]
     assert commands[0].param1 == 1.0
     assert commands[1].param1 == 0.0
-    assert commands[2].param4 == 1.2
-    assert commands[2].param7 == 133.5
     assert isnan(commands[2].param5)
     assert isnan(commands[2].param6)
-    assert isnan(commands[3].param5)
-    assert isnan(commands[3].param6)
+    assert commands[3].param1 == PX4_CUSTOM_MODE_ENABLED
+    assert commands[3].param2 == PX4_CUSTOM_MAIN_MODE_OFFBOARD
     assert commands[4].param1 == PX4_CUSTOM_MODE_ENABLED
-    assert commands[4].param2 == PX4_CUSTOM_MAIN_MODE_OFFBOARD
-    assert commands[5].param1 == PX4_CUSTOM_MODE_ENABLED
-    assert commands[5].param2 == PX4_CUSTOM_MAIN_MODE_AUTO
-    assert commands[5].param3 == PX4_CUSTOM_SUB_MODE_AUTO_LOITER
+    assert commands[4].param2 == PX4_CUSTOM_MAIN_MODE_AUTO
+    assert commands[4].param3 == PX4_CUSTOM_SUB_MODE_AUTO_LOITER
     assert all(msg.from_external for msg in commands)
     assert all(msg.timestamp == 4000 for msg in commands)
     assert all(msg.target_system == 3 for msg in commands)
 
 
-def test_takeoff_without_local_reference_does_not_publish_unsafe_command():
-    interface = make_interface(now_us=4000)
+def test_local_position_ready_requires_fresh_valid_finite_non_dead_reckoning_pose():
+    interface = make_interface(now_us=1_500_000)
+    local_position = VehicleLocalPosition()
+    local_position.timestamp = 1_200_000
+    local_position.x = 1.0
+    local_position.y = 2.0
+    local_position.z = -3.0
+    local_position.heading = 0.5
+    local_position.xy_valid = True
+    local_position.z_valid = True
+    local_position.dead_reckoning = False
+    interface.handle_vehicle_local_position(local_position)
 
-    interface.takeoff(altitude_m=8.0)
+    assert interface.local_position_ready() is True
 
-    assert interface.vehicle_command_publisher.messages == []
+    local_position.dead_reckoning = True
+    assert interface.local_position_ready() is False
+
+    local_position.dead_reckoning = False
+    local_position.xy_valid = False
+    assert interface.local_position_ready() is False
+
+    local_position.xy_valid = True
+    local_position.z_valid = False
+    assert interface.local_position_ready() is False
+
+    local_position.z_valid = True
+    local_position.heading = float('nan')
+    assert interface.local_position_ready() is False
 
 
 def test_vehicle_command_target_system_can_be_broadcast_for_smoke_testing():

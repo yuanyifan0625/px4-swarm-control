@@ -126,6 +126,7 @@ class GroundStationCore:
         self._takeoff_timeout_s: float | None = None
         self._takeoff_reason: str | None = None
         self._takeoff_rejection: str | None = None
+        self._takeoff_timeout_handled = False
         self._arm_started_s: float | None = None
         self._arm_timeout_s: float | None = None
         self._arm_rejection: str | None = None
@@ -219,6 +220,7 @@ class GroundStationCore:
         self._clear_move_leader_state()
         self._clear_change_formation_state()
         self._takeoff_rejection = None
+        self._takeoff_timeout_handled = False
         self._takeoff_started_s = self.now_s()
         self._takeoff_timeout_s = max(float(request.timeout_sec), 0.0)
         self._takeoff_reason = (
@@ -256,7 +258,15 @@ class GroundStationCore:
             result.message = 'all vehicles reached staging positions'
             return result
         if self._takeoff_timed_out():
-            self._transition_to(MissionState.ERROR, 'takeoff staging timed out')
+            if not self._takeoff_timeout_handled:
+                self.publishers.mission_command.publish(
+                    self._mission_command(
+                        MissionCommand.PAUSE,
+                        'takeoff staging timed out',
+                    ),
+                )
+                self._takeoff_timeout_handled = True
+            self._transition_to(MissionState.PAUSED, 'takeoff staging timed out')
             result.success = False
             result.message = 'takeoff staging timed out'
             return result

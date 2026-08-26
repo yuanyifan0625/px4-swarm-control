@@ -42,3 +42,6 @@
 - **Offboard-setpoint acceptance**: PX4's explicit indication that the current
   flight mode accepts Offboard trajectory setpoints. It is not eligibility to
   enter Offboard mode and not the result of pre-flight checks.
+- **Local-position readiness**: A fresh PX4 local-NED pose with valid xy/z,
+  finite x/y/z/heading, and no dead reckoning. It is the takeoff-targeting
+  contract and does not require a global altitude reference.

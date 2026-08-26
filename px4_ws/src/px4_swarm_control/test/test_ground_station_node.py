@@ -337,9 +337,9 @@ def test_takeoff_action_result_succeeds_only_after_current_staging_completion():
     assert result.message == 'all vehicles reached staging positions'
 
 
-def test_takeoff_action_result_times_out_when_staging_never_completes():
+def test_takeoff_timeout_pauses_every_vehicle_once_when_staging_never_completes():
     clock = [10.0]
-    core, _, _ = make_core(now_s=lambda: clock[0])
+    core, publishers, _ = make_core(now_s=lambda: clock[0])
     publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
@@ -351,6 +351,14 @@ def test_takeoff_action_result_times_out_when_staging_never_completes():
     result = core.takeoff_result()
     assert result.success is False
     assert 'timed out' in result.message
+    assert core.mission_state is MissionState.PAUSED
+    assert publishers.mission_command.messages[-1].command == MissionCommand.PAUSE
+    assert publishers.mission_command.messages[-1].reason == 'takeoff staging timed out'
+
+    core.takeoff_result()
+    assert [message.command for message in publishers.mission_command.messages].count(
+        MissionCommand.PAUSE,
+    ) == 1
 
 
 def test_move_leader_action_publishes_world_frame_leader_goal_without_follower_targets():

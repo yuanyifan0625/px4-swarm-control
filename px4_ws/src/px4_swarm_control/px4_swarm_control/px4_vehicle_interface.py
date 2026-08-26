@@ -152,24 +152,6 @@ class Px4VehicleInterface:
             param1=0.0,
         )
 
-    def takeoff(self, altitude_m: float, yaw: float = nan) -> None:
-        # Takeoff command 保留為 PX4 高階任務命令，避免 ROS 2 直接實作起飛控制器。
-        # PX4 v1.17 將 MAV_CMD_NAV_TAKEOFF param7 解讀為 AMSL；上層介面則維持
-        # 相對起飛高度。沒有有效 local reference 時不送出無法確認高度的命令，
-        # vehicle node 下一個 control tick 會在 telemetry 就緒後重試。
-        if (
-            self._latest_local_position is None
-            or not self._latest_local_position.z_global
-            or not isfinite(self._latest_local_position.ref_alt)
-        ):
-            return
-        altitude_amsl = self._latest_local_position.ref_alt + altitude_m
-        self._publish_vehicle_command(
-            VehicleCommand.VEHICLE_CMD_NAV_TAKEOFF,
-            param4=yaw,
-            param7=altitude_amsl,
-        )
-
     def land(self) -> None:
         # Land command 交給 PX4 landing mode，保護降落流程使用 PX4 既有安全邏輯。
         self._publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
@@ -247,6 +229,20 @@ class Px4VehicleInterface:
         if self._latest_local_position is None:
             return True
         return self._telemetry_age_s() > self.telemetry_timeout_s
+
+    def local_position_ready(self) -> bool:
+        """Whether local-NED telemetry is safe to use for takeoff targeting."""
+        position = self._latest_local_position
+        if position is None or self.is_telemetry_stale():
+            return False
+        return bool(position.xy_valid) and bool(position.z_valid) and not bool(
+            position.dead_reckoning,
+        ) and all(isfinite(value) for value in (
+            position.x,
+            position.y,
+            position.z,
+            position.heading,
+        ))
 
     def _publish_vehicle_command(self, command: int, **params: float) -> None:
         msg = VehicleCommand()
