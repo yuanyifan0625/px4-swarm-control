@@ -77,24 +77,24 @@ def test_vee_and_line_abreast_offsets_keep_left_right_signs():
 
     assert formation_body_offset(FormationMode.VEE, Slot.FOLLOWER_LEFT, geometry) == (
         -1.0,
-        1.0,
+        -1.0,
         0.0,
     )
     assert formation_body_offset(FormationMode.VEE, Slot.FOLLOWER_RIGHT, geometry) == (
         -1.0,
-        -1.0,
+        1.0,
         0.0,
     )
     assert formation_body_offset(
         FormationMode.LINE_ABREAST,
         Slot.FOLLOWER_LEFT,
         geometry,
-    ) == (0.0, 1.0, 0.0)
+    ) == (0.0, -1.0, 0.0)
     assert formation_body_offset(
         FormationMode.LINE_ABREAST,
         Slot.FOLLOWER_RIGHT,
         geometry,
-    ) == (0.0, -1.0, 0.0)
+    ) == (0.0, 1.0, 0.0)
 
 
 def test_staging_positions_use_leader_initial_yaw_and_keep_left_slot_left():
@@ -110,11 +110,11 @@ def test_staging_positions_use_leader_initial_yaw_and_keep_left_slot_left():
 
     assert_setpoint_close(
         left,
-        PositionYawSetpoint(x=9.0, y=19.0, z=-5.0, yaw=pi / 2.0),
+        PositionYawSetpoint(x=11.0, y=19.0, z=-5.0, yaw=pi / 2.0),
     )
     assert_setpoint_close(
         right,
-        PositionYawSetpoint(x=11.0, y=19.0, z=-5.0, yaw=pi / 2.0),
+        PositionYawSetpoint(x=9.0, y=19.0, z=-5.0, yaw=pi / 2.0),
     )
 
 

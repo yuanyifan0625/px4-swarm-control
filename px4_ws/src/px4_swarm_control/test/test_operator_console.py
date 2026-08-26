@@ -441,19 +441,19 @@ def test_help_text_lists_negative_field_frame_jog_commands():
 def test_formation_settle_ready_uses_leader_state_and_fixed_follower_slots():
     statuses = {
         1: leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
-        2: follower_status(2, 'follower_left', x=9.0, y=21.0),
-        3: follower_status(3, 'follower_right', x=9.0, y=19.0),
+        2: follower_status(2, 'follower_left', x=9.0, y=19.0),
+        3: follower_status(3, 'follower_right', x=9.0, y=21.0),
     }
 
     assert formation_settle_ready(statuses, 'vee', OperatorConsoleConfig()) is True
 
 
 def test_formation_settle_ready_rejects_stale_or_misaligned_followers():
-    stale_right = follower_status(3, 'follower_right', x=9.0, y=19.0)
+    stale_right = follower_status(3, 'follower_right', x=9.0, y=21.0)
     stale_right.last_telemetry_age_sec = 2.0
     statuses = {
         1: leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
-        2: follower_status(2, 'follower_left', x=9.0, y=21.0),
+        2: follower_status(2, 'follower_left', x=9.0, y=19.0),
         3: stale_right,
     }
 
@@ -484,8 +484,8 @@ def test_formation_settle_gate_requires_continuous_stable_window():
     gate = FormationSettleGate(config, now_s=now_s)
     ready_statuses = {
         1: leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
-        2: follower_status(2, 'follower_left', x=9.0, y=21.0),
-        3: follower_status(3, 'follower_right', x=9.0, y=19.0),
+        2: follower_status(2, 'follower_left', x=9.0, y=19.0),
+        3: follower_status(3, 'follower_right', x=9.0, y=21.0),
     }
 
     assert gate.update(ready_statuses, 'vee') is False

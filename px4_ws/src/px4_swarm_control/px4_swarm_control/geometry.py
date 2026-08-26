@@ -116,7 +116,7 @@ def body_offset_to_world(
 
 def _slot_left_distance(slot: Slot, lateral_spacing_m: float) -> float:
     if slot is Slot.FOLLOWER_LEFT:
-        return lateral_spacing_m
-    if slot is Slot.FOLLOWER_RIGHT:
         return -lateral_spacing_m
+    if slot is Slot.FOLLOWER_RIGHT:
+        return  lateral_spacing_m
     raise ValueError(f'unsupported follower slot: {slot}')

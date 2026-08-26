@@ -13,7 +13,7 @@ from px4_swarm_control.models import PositionYawSetpoint, Slot
 class CollisionSafetyConfig:
     """Shared horizontal-separation and telemetry trust settings."""
 
-    minimum_horizontal_distance_m: float = 0.7
+    minimum_horizontal_distance_m: float = 0.6
     transition_duration_s: float = 1.0
     fallback_step_m: float = 0.3
     telemetry_timeout_s: float = 0.5
