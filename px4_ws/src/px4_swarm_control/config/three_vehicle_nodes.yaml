@@ -73,5 +73,4 @@ ground_station_node:
     formation_position_tolerance_m: 0.02
     formation_yaw_tolerance_rad: 0.1
     telemetry_fresh_timeout_s: 1.0
-    staging_yaw_rad: 0.0
     safety_minimum_horizontal_distance_m: 0.7

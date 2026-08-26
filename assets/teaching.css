@@ -1,0 +1,81 @@
+:root {
+  color-scheme: light;
+  --ink: #17212b;
+  --muted: #5d6b78;
+  --paper: #fbfaf6;
+  --panel: #ffffff;
+  --line: #d9dfdf;
+  --accent: #0f766e;
+  --accent-soft: #e6f4f1;
+  --danger: #a53a32;
+  --code: #17212b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 17px;
+  line-height: 1.72;
+}
+
+main {
+  width: min(820px, calc(100% - 40px));
+  margin: 56px auto 96px;
+}
+
+h1, h2, h3 { line-height: 1.2; letter-spacing: -0.025em; }
+h1 { font-size: clamp(2rem, 6vw, 3.4rem); margin-bottom: .35rem; }
+h2 { margin-top: 2.6rem; font-size: 1.5rem; }
+h3 { margin-top: 1.8rem; }
+p, li { max-width: 72ch; }
+a { color: var(--accent); text-underline-offset: 3px; }
+.lede { color: var(--muted); font-size: 1.15rem; max-width: 64ch; }
+.eyebrow { color: var(--accent); font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.card, .answer, .callout {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px 22px;
+  margin: 18px 0;
+}
+.callout { border-left: 5px solid var(--accent); }
+.danger { border-left-color: var(--danger); }
+.flow {
+  white-space: pre-wrap;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--accent-soft);
+  border-radius: 14px;
+  padding: 22px;
+  overflow-x: auto;
+}
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+code { background: #edf0ef; padding: .12em .35em; border-radius: 5px; }
+pre {
+  background: var(--code);
+  color: #f7faf9;
+  padding: 18px;
+  border-radius: 12px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+pre code { background: transparent; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 18px 0; }
+th, td { border-bottom: 1px solid var(--line); padding: 10px 8px; text-align: left; }
+th { color: var(--muted); font-size: .9rem; }
+details { margin: 12px 0; }
+summary { cursor: pointer; font-weight: 700; }
+.small { color: var(--muted); font-size: .92rem; }
+nav { display: flex; gap: 18px; flex-wrap: wrap; margin: 28px 0; }
+
+@media print {
+  body { background: white; font-size: 11pt; }
+  main { width: 100%; margin: 0; }
+  nav { display: none; }
+  .card, .answer, .callout { break-inside: avoid; }
+  a { color: inherit; text-decoration: none; }
+}

@@ -10,6 +10,10 @@
 PX4 SITL, Gazebo, Micro XRCE-DDS Agent, QGC, `operator_console`, and PX4 speed
 profile commands are external workflow steps, not launch-file children.
 
+Use `config/final_operator_console_sitl_real_manual.zh.md` for their exact
+startup order and the replayable two-cycle demo. `operator_console` is the
+only installed manual control entrypoint.
+
 Real-deployment launch files start one ROS 2 node each:
 
 - `real_mav1_vehicle.launch.py`
@@ -22,3 +26,7 @@ Real-deployment launch files start one ROS 2 node each:
 starts only `operator_console` and accepts `settle_position_tolerance_m:=...` plus
 `settle_stable_duration_s:=...`; the shortest console entrypoint remains
 `ros2 run px4_swarm_control operator_console`.
+
+Before accepting takeoff, the ground station requires a fresh MAV1 position
+and yaw. That pose anchors VEE staging, so a second takeoff after land does not
+return the swarm to a fixed `(0, 0)` origin.

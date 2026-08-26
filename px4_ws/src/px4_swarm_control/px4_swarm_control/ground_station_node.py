@@ -70,7 +70,6 @@ class GroundStationConfig:
     formation_position_tolerance_m: float = FORMATION_POSITION_TOLERANCE_M
     formation_yaw_tolerance_rad: float = 0.2
     telemetry_fresh_timeout_s: float = 1.0
-    staging_yaw_rad: float = 0.0
     safety_minimum_horizontal_distance_m: float = 0.7
 
 
@@ -120,6 +119,7 @@ class GroundStationCore:
         self.mission_state = MissionState.IDLE
         self.active_formation = config.active_formation
         self.vehicle_statuses: Dict[int, VehicleStatus] = {}
+        self.vehicle_status_received_s: Dict[int, float] = {}
         self.staging_targets: Dict[int, PositionYawSetpoint] = {}
         self._staging_complete_logged = False
         self._takeoff_started_s: float | None = None
@@ -199,6 +199,21 @@ class GroundStationCore:
             # Pause 期間拒絕起飛新任務，保護暫停語意只允許 resume/status/land。
             self._takeoff_rejection = 'TakeoffSwarm rejected while swarm is paused'
             return self.takeoff_feedback()
+        leader_status = self.vehicle_statuses.get(1)
+        leader_status_received_s = self.vehicle_status_received_s.get(1)
+        if not _staging_anchor_status_is_fresh(
+            leader_status,
+            self.config.telemetry_fresh_timeout_s,
+            cache_age_s=(
+                self.now_s() - leader_status_received_s
+                if leader_status_received_s is not None
+                else float('inf')
+            ),
+        ):
+            self._takeoff_rejection = (
+                'takeoff rejected: fresh MAV1 staging anchor unavailable'
+            )
+            return self.takeoff_feedback()
         # 新任務先清掉舊 status，保護 action completion 不被上一輪 landed/staging 污染。
         self.vehicle_statuses = {}
         self._clear_move_leader_state()
@@ -212,7 +227,7 @@ class GroundStationCore:
         self._land_started_s = None
         self._land_timeout_s = None
         self._transition_to(MissionState.TAKING_OFF, 'takeoff action accepted')
-        self._publish_staging_setpoints(request.altitude_m)
+        self._publish_staging_setpoints(request.altitude_m, leader_status)
         self.publishers.mission_command.publish(
             self._mission_command(MissionCommand.TAKEOFF, self._takeoff_reason),
         )
@@ -460,7 +475,9 @@ class GroundStationCore:
         return None
 
     def handle_vehicle_status(self, msg: VehicleStatus) -> None:
-        self.vehicle_statuses[int(msg.vehicle_id)] = msg
+        vehicle_id = int(msg.vehicle_id)
+        self.vehicle_statuses[vehicle_id] = msg
+        self.vehicle_status_received_s[vehicle_id] = self.now_s()
         if msg.vehicle_state == VehicleLevelState.FAILSAFE.value:
             # 任一 vehicle 進入 failsafe 代表任務層要停止正常流程，避免繼續發布移動命令。
             self._transition_to(MissionState.FAILSAFE, 'vehicle reported failsafe')
@@ -503,7 +520,11 @@ class GroundStationCore:
             for status in self.vehicle_statuses.values()
         )
 
-    def _publish_staging_setpoints(self, altitude_m: float) -> None:
+    def _publish_staging_setpoints(
+        self,
+        altitude_m: float,
+        leader_status: VehicleStatus,
+    ) -> None:
         # 起飛 staging 固定用 world frame，保護三機在離地前後維持水平安全間距。
         geometry = FormationGeometry(
             vee_lateral_spacing_m=self.config.staging_lateral_spacing_m,
@@ -513,10 +534,10 @@ class GroundStationCore:
             ),
         )
         leader = PositionYawSetpoint(
-            x=0.0,
-            y=0.0,
-            z=-abs(float(altitude_m)),
-            yaw=self.config.staging_yaw_rad,
+            x=leader_status.x,
+            y=leader_status.y,
+            z=leader_status.z - abs(float(altitude_m)),
+            yaw=leader_status.yaw,
         )
         self.staging_targets = {}
         self._staging_complete_logged = False
@@ -1061,7 +1082,6 @@ class GroundStationNode(Node):
         )
         self.declare_parameter('formation_yaw_tolerance_rad', 0.2)
         self.declare_parameter('telemetry_fresh_timeout_s', 1.0)
-        self.declare_parameter('staging_yaw_rad', 0.0)
         self.declare_parameter('safety_minimum_horizontal_distance_m', 0.7)
 
     def _load_config(self) -> GroundStationConfig:
@@ -1094,7 +1114,6 @@ class GroundStationNode(Node):
             telemetry_fresh_timeout_s=float(
                 self.get_parameter('telemetry_fresh_timeout_s').value,
             ),
-            staging_yaw_rad=float(self.get_parameter('staging_yaw_rad').value),
             safety_minimum_horizontal_distance_m=float(
                 self.get_parameter('safety_minimum_horizontal_distance_m').value,
             ),
@@ -1128,6 +1147,23 @@ def _yaw_error_rad(current_yaw: float, target_yaw: float) -> float:
 
 def _status_pose_is_finite(status: VehicleStatus) -> bool:
     return all(isfinite(value) for value in (status.x, status.y, status.z, status.yaw))
+
+
+def _staging_anchor_status_is_fresh(
+    status: VehicleStatus | None,
+    telemetry_fresh_timeout_s: float,
+    *,
+    cache_age_s: float,
+) -> bool:
+    return (
+        status is not None
+        and int(status.vehicle_id) == 1
+        and isfinite(cache_age_s)
+        and 0.0 <= cache_age_s <= telemetry_fresh_timeout_s
+        and isfinite(status.last_telemetry_age_sec)
+        and status.last_telemetry_age_sec <= telemetry_fresh_timeout_s
+        and _status_pose_is_finite(status)
+    )
 
 
 def _guard_status_observation(status: VehicleStatus | None):

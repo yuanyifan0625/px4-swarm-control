@@ -31,8 +31,6 @@ setup(
         "console_scripts": [
             "check_live_px4_gz_bridge = px4_swarm_control.live_bridge_smoke:main",
             "check_px4_v117_compatibility = px4_swarm_control.px4_compatibility:main",
-            "coordinate_frame_probe = px4_swarm_control.coordinate_frame_probe:main",
-            "field_frame_console = px4_swarm_control.field_frame_console:main",
             "ground_station_node = px4_swarm_control.ground_station_node:main",
             "operator_console = px4_swarm_control.operator_console:main",
             "px4_speed_profile = px4_swarm_control.px4_speed_profile:main",

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>修正 VehicleStatus 版本不相容</title>
+  <link rel="stylesheet" href="../assets/teaching.css">
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0001 · 約 6 分鐘</p>
+  <h1>修正 <code>VehicleStatus</code> 版本不相容</h1>
+  <p class="lede">目標：看見 <code>AttributeError</code> 時，能快速判斷是 message contract 問題，並把修正留在 PX4 adapter seam。</p>
+
+  <nav>
+    <a href="#cause">錯在哪裡</a>
+    <a href="#solution">怎麼修</a>
+    <a href="#verify">怎麼驗證</a>
+    <a href="../reference/px4-message-compatibility-cheatsheet.html">速查表</a>
+  </nav>
+
+  <section class="callout">
+    <strong>30 秒結論</strong>
+    <p>程式是按新版 <code>VehicleStatus</code> 寫的，但 runtime 載入的是 v1.17 message。v1 沒有該欄位，所以直接存取必然拋錯。修正在 adapter 做安全欄位轉換，topic 名則依每個 message 的版本產生；上層完全不動。</p>
+  </section>
+
+  <h2 id="cause">1. 錯誤不是飛控失效，是 contract 不一致</h2>
+  <pre><code>offboard_available = vehicle_status.accepts_offboard_setpoints
+# AttributeError: VehicleStatus 沒有這個欄位</code></pre>
+
+  <p>目前正式組合是 PX4 firmware <code>d6f12ad</code> 與 <code>px4_msgs 86d8239</code>。兩邊的 <code>VehicleStatus</code> 都是 v1，具有 <code>pre_flight_checks_pass</code>，但沒有 <code>accepts_offboard_setpoints</code>。因此錯誤是確定性的，不是偶發 race condition。</p>
+
+  <div class="flow">PX4 VehicleStatus v1
+        ↓ raw px4_msgs
+Px4VehicleInterface adapter   ← 相容修正放這裡
+        ↓ internal VehicleState
+vehicle_node → /MAVN/status → ground station</div>
+
+  <p>如果在每個上層 caller 都加 <code>hasattr</code>，版本知識會擴散；未來改版要改很多處。Adapter 已經負責把 raw PX4 telemetry 轉成 internal model，所以它是正確 seam。</p>
+
+  <h2 id="solution">2. 解法包含兩個彼此獨立的修正</h2>
+
+  <h3>A. 欄位 shape：缺少時保守映射</h3>
+  <pre><code>def current_mode_accepts_offboard_setpoints(status) -&gt; bool:
+    return bool(getattr(status, "accepts_offboard_setpoints", False))</code></pre>
+
+  <ul>
+    <li>v1 沒欄位：回傳 <code>False</code>，不再拋錯。</li>
+    <li>較新版有欄位：保留 PX4 明確回報的值。</li>
+    <li>不使用 <code>nav_state == OFFBOARD</code> 猜測，因為「目前模式」與「明確接受 setpoint」不是同一個事實。</li>
+  </ul>
+
+  <div class="callout danger">
+    <strong><code>False</code> 的精確意思</strong>
+    <p>它表示「沒有得到 PX4 的明確肯定」。在 v1 中也包含「這個版本根本無法回報」。它不表示飛機一定不能進入 Offboard。</p>
+  </div>
+
+  <h3>B. Topic name：由 message version 決定</h3>
+  <pre><code>def versioned_topic(base, message_type):
+    version = int(getattr(message_type, "MESSAGE_VERSION", 0))
+    return base if version == 0 else f"{base}_v{version}"</code></pre>
+
+  <table>
+    <tr><th>Message</th><th>Version</th><th>結果</th></tr>
+    <tr><td>VehicleLocalPosition</td><td>1</td><td><code>vehicle_local_position_v1</code></td></tr>
+    <tr><td>VehicleStatus</td><td>1</td><td><code>vehicle_status_v1</code></td></tr>
+    <tr><td>VehicleCommandAck</td><td>0</td><td><code>vehicle_command_ack</code></td></tr>
+  </table>
+
+  <p>這也修正了另一個隱藏問題：原本 command acknowledgement 被錯寫成 <code>_v1</code>。具名的 <code>PX4_V117</code> profile 保存正式 revisions 與預期 message types，但不再複製一份容易過期的 suffix tuple。</p>
+
+  <h2 id="verify">3. 三層證據才叫修好</h2>
+
+  <ol>
+    <li><strong>Unit test：</strong>餵入沒有該欄位的 v1-shaped status，conversion 成功且得到 <code>False</code>；再測有欄位且為 <code>True</code> 的 shape。</li>
+    <li><strong>Compatibility smoke：</strong>確認 commits、八個 message definitions、版本、欄位與推導出的 topic names。</li>
+    <li><strong>Gazebo runtime：</strong>用 verbose endpoint inspection 證明三台都有 bare-DDS publisher，再完成起飛、移動、變陣、降落，logs 中沒有 AttributeError。</li>
+  </ol>
+
+  <p>只看到 topic 名存在不夠，因為 subscriber 自己也會讓 topic 出現在 ROS graph。必須看 <code>Publisher count</code> 與 endpoint。</p>
+
+  <h2>快速回想</h2>
+  <div class="card">
+    <p><strong>問題 1：</strong>為什麼不能在 ground station 補 <code>hasattr</code>？</p>
+    <details><summary>查看答案</summary><p>因為 raw PX4 shape 應被 adapter 隔離；放上層會擴散版本知識。</p></details>
+
+    <p><strong>問題 2：</strong>缺少欄位時，為什麼不用 <code>nav_state</code> 推導？</p>
+    <details><summary>查看答案</summary><p>因為兩者是不同事實；推導會把未知誤報為已明確確認。</p></details>
+
+    <p><strong>問題 3：</strong>為什麼 topic list 不是 runtime 證據？</p>
+    <details><summary>查看答案</summary><p>因為只有 subscriber 也會建立名稱；必須確認真正 publisher endpoint。</p></details>
+  </div>
+
+  <h2>Primary sources</h2>
+  <ul>
+    <li><a href="https://github.com/PX4/PX4-Autopilot/blob/d6f12ad1c4f70ad3230afd7d86e971421e02fef4/msg/versioned/VehicleStatus.msg">PX4 v1.17.0 VehicleStatus definition</a></li>
+    <li><a href="https://github.com/PX4/px4_msgs/blob/86d8239e962f6939e05c3737784f60c02fa884db/msg/VehicleStatus.msg">px4_msgs v1.17.0 VehicleStatus definition</a></li>
+    <li><a href="https://docs.px4.io/main/en/ros2/px4_ros2_msg_translation_node.html">PX4 message versioning and translation documentation</a></li>
+  </ul>
+
+  <p class="small">實作規格見 <a href="../.scratch/px4-swarm-control/issues/17-align-px4-v117-telemetry-contract.zh.md">Ticket 17</a>；端到端驗證見 <a href="../.scratch/px4-swarm-control/issues/18-validate-px4-v117-three-vehicle-gazebo-control.zh.md">Ticket 18</a>。有任何一步不清楚，直接問我，我會針對那一步補一個更小的練習。</p>
+</main>
+</body>
+</html>

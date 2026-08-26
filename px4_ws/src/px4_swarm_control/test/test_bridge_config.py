@@ -1,4 +1,4 @@
-from px4_swarm_control.bridge_config import PX4_V117
+from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES, PX4_V117
 from px4_swarm_control.bridge_config import versioned_topic_suffix
 
 
@@ -38,3 +38,9 @@ def test_px4_v117_profile_centralizes_revisions_and_used_message_contracts():
         'VehicleLocalPosition': 1,
         'VehicleStatus': 1,
     }
+
+
+def test_first_version_bridge_keeps_sitl_instance_distinct_from_vehicle_identity():
+    assert [vehicle.px4_instance for vehicle in FIRST_VERSION_VEHICLES] == [1, 2, 3]
+    assert [vehicle.px4_target_system for vehicle in FIRST_VERSION_VEHICLES] == [1, 2, 3]
+    assert [vehicle.sitl_instance for vehicle in FIRST_VERSION_VEHICLES] == [0, 1, 2]

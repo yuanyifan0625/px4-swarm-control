@@ -106,6 +106,7 @@ class VehicleBridgeExpectation:
     namespace: str
     px4_instance: int
     px4_target_system: int
+    sitl_instance: int
     model_name: str
     role: VehicleRole
     slot: Slot
@@ -122,7 +123,8 @@ FIRST_VERSION_VEHICLES: Tuple[
         '/MAV1',
         1,
         1,
-        'x500_1',
+        0,
+        'x500_0',
         VehicleRole.LEADER,
         Slot.LEADER,
         None,
@@ -132,20 +134,22 @@ FIRST_VERSION_VEHICLES: Tuple[
         '/MAV2',
         2,
         2,
-        'x500_2',
+        1,
+        'x500_1',
         VehicleRole.FOLLOWER,
         Slot.FOLLOWER_LEFT,
-        '0,2,0',
+        '-1,-1,0',
     ),
     VehicleBridgeExpectation(
         'MAV3',
         '/MAV3',
         3,
         3,
-        'x500_3',
+        2,
+        'x500_2',
         VehicleRole.FOLLOWER,
         Slot.FOLLOWER_RIGHT,
-        '0,-2,0',
+        '-1,1,0',
     ),
 )
 

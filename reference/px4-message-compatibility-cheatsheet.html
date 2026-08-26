@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PX4 Message Compatibility — 速查表</title>
+  <link rel="stylesheet" href="../assets/teaching.css">
+</head>
+<body>
+<main>
+  <p class="eyebrow">Quick reference</p>
+  <h1>PX4 Message Compatibility</h1>
+  <p class="lede">遇到欄位不存在或 topic 接不到時，依序檢查 shape、name、endpoint；不要先改上層。</p>
+
+  <h2>目前固定 contract</h2>
+  <table>
+    <tr><th>項目</th><th>固定值</th></tr>
+    <tr><td>PX4 firmware</td><td><code>v1.17.0 @ d6f12ad</code></td></tr>
+    <tr><td>px4_msgs</td><td><code>v1.17.0 @ 86d8239</code></td></tr>
+    <tr><td>VehicleStatus</td><td>v1；沒有 <code>accepts_offboard_setpoints</code></td></tr>
+    <tr><td>Translation node</td><td>不需要</td></tr>
+  </table>
+
+  <h2>三步診斷</h2>
+  <ol>
+    <li><strong>Shape：</strong><code>ros2 interface show</code> 確認實際欄位與 <code>MESSAGE_VERSION</code>。</li>
+    <li><strong>Name：</strong>v0 無 suffix；v1 使用 <code>_v1</code>。</li>
+    <li><strong>Endpoint：</strong><code>ros2 topic info -v</code> 必須看到真正 publisher；topic list 不夠。</li>
+  </ol>
+
+  <h2>安全 fallback</h2>
+  <pre><code>bool(getattr(status, "accepts_offboard_setpoints", False))</code></pre>
+  <p>缺欄位代表「PX4 沒有明確提供資訊」，不是可以從 <code>nav_state</code> 猜出答案。</p>
+
+  <h2>Topic 規則</h2>
+  <pre><code>version = int(getattr(message_type, "MESSAGE_VERSION", 0))
+suffix = "" if version == 0 else f"_v{version}"</code></pre>
+  <table>
+    <tr><th>Message</th><th>Topic ending</th></tr>
+    <tr><td>VehicleLocalPosition v1</td><td><code>vehicle_local_position_v1</code></td></tr>
+    <tr><td>VehicleStatus v1</td><td><code>vehicle_status_v1</code></td></tr>
+    <tr><td>VehicleCommandAck v0</td><td><code>vehicle_command_ack</code></td></tr>
+  </table>
+
+  <h2>驗證階梯</h2>
+  <p><strong>Unit：</strong>v1-shaped status 不拋錯 → <strong>Smoke：</strong>versions/topics/endpoints 相符 → <strong>Gazebo：</strong>三機起飛、移動、變陣、降落。</p>
+
+  <p class="small">延伸：<a href="../lessons/0001-fix-vehicle-status-version-mismatch.html">回到完整短課程</a></p>
+</main>
+</body>
+</html>

@@ -73,6 +73,7 @@ def make_core(now_stamp=None, now_s=None):
 
 def test_takeoff_action_starts_mission_without_reporting_success_before_staging():
     core, publishers, logger = make_core()
+    publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
     request.timeout_sec = 30.0
@@ -100,6 +101,97 @@ def test_takeoff_action_starts_mission_without_reporting_success_before_staging(
     assert isclose(right.y, -1.0, abs_tol=1e-6)
     assert (right.z, right.yaw) == (-5.0, 0.0)
     assert logger.infos[-1].startswith('swarm mission idle -> taking_off')
+
+
+def test_takeoff_staging_uses_fresh_leader_position_and_yaw_as_anchor():
+    core, publishers, _ = make_core()
+    core.handle_vehicle_status(
+        vehicle_status(
+            1,
+            x=10.0,
+            y=20.0,
+            z=0.2,
+            yaw=1.5707963267948966,
+            vehicle_state='landed',
+        )
+    )
+    request = TakeoffSwarm.Goal()
+    request.altitude_m = 1.5
+    request.timeout_sec = 30.0
+
+    core.start_takeoff(request)
+
+    leader = publishers.vehicle_setpoints[1].messages[-1]
+    left = publishers.vehicle_setpoints[2].messages[-1]
+    right = publishers.vehicle_setpoints[3].messages[-1]
+    assert isclose(leader.x, 10.0, abs_tol=1e-6)
+    assert isclose(leader.y, 20.0, abs_tol=1e-6)
+    assert isclose(leader.z, -1.3, abs_tol=1e-6)
+    assert isclose(leader.yaw, 1.5707963267948966, abs_tol=1e-6)
+    assert isclose(left.x, 9.0, abs_tol=1e-6)
+    assert isclose(left.y, 19.0, abs_tol=1e-6)
+    assert isclose(right.x, 11.0, abs_tol=1e-6)
+    assert isclose(right.y, 19.0, abs_tol=1e-6)
+
+
+def test_takeoff_rejects_when_leader_staging_anchor_is_unavailable():
+    core, publishers, _ = make_core()
+    request = TakeoffSwarm.Goal()
+    request.altitude_m = 1.5
+    request.timeout_sec = 30.0
+
+    feedback = core.start_takeoff(request)
+    result = core.takeoff_result()
+
+    assert feedback.current_state == 'idle'
+    assert result.success is False
+    assert result.message == 'takeoff rejected: fresh MAV1 staging anchor unavailable'
+    assert publishers.mission_command.messages == []
+    assert all(not publisher.messages for publisher in publishers.vehicle_setpoints.values())
+
+
+def test_takeoff_rejects_stale_leader_staging_anchor_without_publishing_commands():
+    core, publishers, _ = make_core()
+    core.handle_vehicle_status(
+        vehicle_status(
+            1,
+            x=10.0,
+            y=20.0,
+            z=0.0,
+            yaw=0.5,
+            last_telemetry_age_sec=5.0,
+            vehicle_state='landed',
+        )
+    )
+    request = TakeoffSwarm.Goal()
+    request.altitude_m = 1.5
+    request.timeout_sec = 30.0
+
+    core.start_takeoff(request)
+    result = core.takeoff_result()
+
+    assert result.success is False
+    assert result.message == 'takeoff rejected: fresh MAV1 staging anchor unavailable'
+    assert publishers.mission_command.messages == []
+    assert all(not publisher.messages for publisher in publishers.vehicle_setpoints.values())
+
+
+def test_takeoff_rejects_cached_anchor_after_status_delivery_stops():
+    clock = [10.0]
+    core, publishers, _ = make_core(now_s=lambda: clock[0])
+    publish_fresh_staging_anchor(core)
+    clock[0] = 12.0
+    request = TakeoffSwarm.Goal()
+    request.altitude_m = 1.5
+    request.timeout_sec = 30.0
+
+    core.start_takeoff(request)
+    result = core.takeoff_result()
+
+    assert result.success is False
+    assert result.message == 'takeoff rejected: fresh MAV1 staging anchor unavailable'
+    assert publishers.mission_command.messages == []
+    assert all(not publisher.messages for publisher in publishers.vehicle_setpoints.values())
 
 
 def test_default_ground_station_config_uses_small_field_operation_profile():
@@ -230,6 +322,7 @@ def test_arm_action_succeeds_after_three_fresh_armed_statuses_while_landed():
 
 def test_takeoff_action_result_succeeds_only_after_current_staging_completion():
     core, _, _ = make_core()
+    publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
     request.timeout_sec = 30.0
@@ -247,6 +340,7 @@ def test_takeoff_action_result_succeeds_only_after_current_staging_completion():
 def test_takeoff_action_result_times_out_when_staging_never_completes():
     clock = [10.0]
     core, _, _ = make_core(now_s=lambda: clock[0])
+    publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
     request.timeout_sec = 2.0
@@ -999,6 +1093,41 @@ def test_takeoff_ignores_cached_landed_statuses_from_previous_mission():
     assert core.takeoff_result() is None
 
 
+def test_second_takeoff_after_land_uses_new_fresh_leader_anchor_without_restart():
+    core, publishers, _ = make_core()
+    publish_fresh_staging_anchor(core)
+    takeoff = TakeoffSwarm.Goal()
+    takeoff.altitude_m = 1.5
+    takeoff.timeout_sec = 30.0
+    core.start_takeoff(takeoff)
+    publish_staged_statuses(core, altitude_m=1.5)
+    assert core.takeoff_result().success is True
+
+    land = LandSwarm.Goal()
+    land.timeout_sec = 30.0
+    core.start_land(land)
+    for vehicle_id in (1, 2, 3):
+        core.handle_vehicle_status(
+            vehicle_status(
+                vehicle_id,
+                x=2.0 if vehicle_id == 1 else 0.0,
+                y=3.0 if vehicle_id == 1 else 0.0,
+                z=0.1,
+                yaw=0.5 if vehicle_id == 1 else 0.0,
+                vehicle_state='landed',
+            )
+        )
+    assert core.land_result().success is True
+
+    core.start_takeoff(takeoff)
+
+    second_leader_target = publishers.vehicle_setpoints[1].messages[-1]
+    assert core.mission_state is MissionState.TAKING_OFF
+    assert (second_leader_target.x, second_leader_target.y) == (2.0, 3.0)
+    assert isclose(second_leader_target.z, -1.4, abs_tol=1e-6)
+    assert isclose(second_leader_target.yaw, 0.5, abs_tol=1e-6)
+
+
 def test_land_ignores_cached_landed_statuses_until_current_mission_reports_land():
     core, _, _ = make_core()
     for vehicle_id in (1, 2, 3):
@@ -1035,6 +1164,7 @@ def test_land_does_not_complete_from_stale_landed_statuses():
 
 def test_republish_staging_setpoints_resends_current_targets_for_all_vehicles():
     core, publishers, _ = make_core()
+    publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
     request.timeout_sec = 30.0
@@ -1057,6 +1187,7 @@ def test_republish_staging_setpoints_resends_current_targets_for_all_vehicles():
 
 def test_republish_takeoff_request_resends_staging_targets_and_takeoff_command():
     core, publishers, _ = make_core()
+    publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
     request.timeout_sec = 30.0
@@ -1073,6 +1204,7 @@ def test_republish_takeoff_request_resends_staging_targets_and_takeoff_command()
 
 def test_vehicle_status_detects_all_staged_and_logs_progress_once():
     core, _, logger = make_core()
+    publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
     core.start_takeoff(request)
@@ -1110,6 +1242,7 @@ def test_vehicle_status_detects_all_staged_and_logs_progress_once():
 
 def test_vehicle_status_does_not_mark_staged_without_armed_telemetry_and_offboard_ready():
     core, _, logger = make_core()
+    publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
     core.start_takeoff(request)
@@ -1132,6 +1265,7 @@ def test_vehicle_status_does_not_mark_staged_without_armed_telemetry_and_offboar
 
 def test_vehicle_status_does_not_mark_staged_with_stale_finite_telemetry_age():
     core, _, logger = make_core()
+    publish_fresh_staging_anchor(core)
     request = TakeoffSwarm.Goal()
     request.altitude_m = 5.0
     core.start_takeoff(request)
@@ -1194,11 +1328,11 @@ def test_ground_station_node_starts_under_swarm_namespace_with_actions(monkeypat
         rclpy.shutdown()
 
 
-def publish_staged_statuses(core):
+def publish_staged_statuses(core, *, altitude_m=5.0):
     for vehicle_id, point in (
-        (1, (0.0, 0.0, -5.0)),
-        (2, (-1.0, 1.0, -5.0)),
-        (3, (-1.0, -1.0, -5.0)),
+        (1, (0.0, 0.0, -altitude_m)),
+        (2, (-1.0, 1.0, -altitude_m)),
+        (3, (-1.0, -1.0, -altitude_m)),
     ):
         status = VehicleStatus()
         status.vehicle_id = vehicle_id
@@ -1209,6 +1343,20 @@ def publish_staged_statuses(core):
         status.last_telemetry_age_sec = 0.1
         status.vehicle_state = 'staging'
         core.handle_vehicle_status(status)
+
+
+def publish_fresh_staging_anchor(core, *, x=0.0, y=0.0, z=0.0, yaw=0.0):
+    core.handle_vehicle_status(
+        vehicle_status(
+            1,
+            x=x,
+            y=y,
+            z=z,
+            yaw=yaw,
+            slot='leader',
+            vehicle_state='landed',
+        )
+    )
 
 
 def publish_safe_following_statuses(core):

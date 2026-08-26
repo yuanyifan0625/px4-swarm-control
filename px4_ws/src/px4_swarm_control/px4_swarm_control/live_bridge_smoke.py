@@ -22,17 +22,18 @@ def expected_px4_instance_commands() -> tuple[str, str, str]:
     commands = []
     for vehicle in FIRST_VERSION_VEHICLES:
         env = [
+            'PX4_GZ_NO_FOLLOW=1',
             f'PX4_UXRCE_DDS_NS={vehicle.namespace.lstrip("/")}',
             'PX4_SYS_AUTOSTART=4001',
             'PX4_SIM_MODEL=gz_x500',
         ]
         if vehicle.spawn_pose is not None:
-            env.insert(1, 'PX4_GZ_STANDALONE=1')
-            env.insert(3, f'PX4_GZ_MODEL_POSE="{vehicle.spawn_pose}"')
+            env.insert(2, 'PX4_GZ_STANDALONE=1')
+            env.insert(4, f'PX4_GZ_MODEL_POSE="{vehicle.spawn_pose}"')
         command = ' '.join(
             [
                 *env,
-                f'./build/px4_sitl_default/bin/px4 -i {vehicle.px4_instance}',
+                f'./build/px4_sitl_default/bin/px4 -i {vehicle.sitl_instance}',
             ],
         )
         commands.append(command)
@@ -181,7 +182,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if missing_models:
         print('Missing Gazebo models: ' + ', '.join(missing_models))
     else:
-        print('Gazebo models OK: x500_1, x500_2, x500_3')
+        print('Gazebo models OK: x500_0, x500_1, x500_2')
 
     if missing_pose:
         print('Missing or unseparated Gazebo model poses: ' + ', '.join(missing_pose))
