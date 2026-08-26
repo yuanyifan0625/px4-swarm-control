@@ -1,7 +1,7 @@
 # Operator console defaults for first-version manual SITL control.
 operator_console:
   ros__parameters:
-    takeoff_altitude_m: 1.5
+    takeoff_altitude_m: 0.5
     default_timeout_sec: 60.0
     move_step_x_m: 1.0
     move_step_y_m: 1.0
