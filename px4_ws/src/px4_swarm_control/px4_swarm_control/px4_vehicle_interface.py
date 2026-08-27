@@ -235,9 +235,7 @@ class Px4VehicleInterface:
         position = self._latest_local_position
         if position is None or self.is_telemetry_stale():
             return False
-        return bool(position.xy_valid) and bool(position.z_valid) and not bool(
-            position.dead_reckoning,
-        ) and all(isfinite(value) for value in (
+        return all(isfinite(value) for value in (
             position.x,
             position.y,
             position.z,

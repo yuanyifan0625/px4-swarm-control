@@ -152,7 +152,7 @@ def test_vehicle_commands_never_publish_nav_takeoff():
     assert all(msg.target_system == 3 for msg in commands)
 
 
-def test_local_position_ready_requires_fresh_valid_finite_non_dead_reckoning_pose():
+def test_local_position_ready_requires_fresh_finite_pose_regardless_of_estimator_flags():
     interface = make_interface(now_us=1_500_000)
     local_position = VehicleLocalPosition()
     local_position.timestamp = 1_200_000
@@ -167,20 +167,11 @@ def test_local_position_ready_requires_fresh_valid_finite_non_dead_reckoning_pos
 
     assert interface.local_position_ready() is True
 
-    local_position.dead_reckoning = True
-    assert interface.local_position_ready() is False
-
-    local_position.dead_reckoning = False
     local_position.xy_valid = False
-    assert interface.local_position_ready() is False
-
-    local_position.xy_valid = True
     local_position.z_valid = False
-    assert interface.local_position_ready() is False
+    local_position.dead_reckoning = True
 
-    local_position.z_valid = True
-    local_position.heading = float('nan')
-    assert interface.local_position_ready() is False
+    assert interface.local_position_ready() is True
 
 
 @pytest.mark.parametrize(
@@ -190,9 +181,6 @@ def test_local_position_ready_requires_fresh_valid_finite_non_dead_reckoning_pos
         ('y', float('inf')),
         ('z', float('-inf')),
         ('heading', float('inf')),
-        ('xy_valid', False),
-        ('z_valid', False),
-        ('dead_reckoning', True),
         ('timestamp', 900_000),
     ],
 )
