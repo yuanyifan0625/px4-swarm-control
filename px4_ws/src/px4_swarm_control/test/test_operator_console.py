@@ -291,8 +291,8 @@ def test_field_frame_jog_commands_convert_to_absolute_ned_goal():
     dispatcher.dispatch('5')
 
     move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
-    assert move_calls[0][1:5] == (1.0, 3.0, -5.0, 0.0)
-    assert move_calls[1][1:5] == (2.0, 2.0, -5.0, 0.0)
+    assert move_calls[0][1:5] == (2.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:5] == (1.0, 3.0, -5.0, 0.0)
     assert move_calls[2][1:5] == (1.0, 2.0, -6.0, 0.0)
     assert move_calls[3][1:4] == (1.0, 2.0, -5.0)
     assert isclose(move_calls[3][4], pi / 4.0)
@@ -317,8 +317,8 @@ def test_negative_field_frame_jog_commands_convert_to_absolute_ned_goals():
     dispatcher.dispatch('c')
 
     move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
-    assert move_calls[0][1:5] == (1.0, 1.0, -5.0, 0.0)
-    assert move_calls[1][1:5] == (0.0, 2.0, -5.0, 0.0)
+    assert move_calls[0][1:5] == (0.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:5] == (1.0, 1.0, -5.0, 0.0)
     assert move_calls[2][1:5] == (1.0, 2.0, -4.0, 0.0)
     assert move_calls[3][1:4] == (1.0, 2.0, -5.0)
     assert isclose(move_calls[3][4], -pi / 4.0)
@@ -455,16 +455,16 @@ def test_demo_macro_home_yaw_rotates_current_leader_pose_to_home_yaw_before_home
 
     assert result.success is True
     move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
-    assert move_calls[0][1:5] == (1.0, 3.0, -5.0, 0.0)
-    assert move_calls[1][1:4] == (1.0, 3.0, -5.0)
+    assert move_calls[0][1:5] == (2.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:4] == (2.0, 2.0, -5.0)
     assert isclose(move_calls[1][4], pi / 6.0)
-    assert move_calls[2][1:5] == (1.0, 3.0, -5.0, 0.0)
+    assert move_calls[2][1:5] == (2.0, 2.0, -5.0, 0.0)
     assert move_calls[3][1:5] == (1.0, 2.0, -5.0, 0.0)
     assert gateway.calls == [
         ('takeoff', 1.5, 60.0),
-        ('move_leader', 1.0, 3.0, -5.0, 0.0, 0.3, 0.2, 60.0),
-        ('move_leader', 1.0, 3.0, -5.0, pi / 6.0, 0.3, 0.2, 60.0),
-        ('move_leader', 1.0, 3.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, pi / 6.0, 0.3, 0.2, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('settle', 'vee', 1.5, 30.0, 0.02, 0.25),
         ('move_leader', 1.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('settle', 'vee', 1.5, 30.0, 0.02, 0.25),
@@ -505,7 +505,7 @@ def test_demo_macro_stops_on_first_failed_action():
     assert 'move failed' in result.message
     assert gateway.calls == [
         ('takeoff', 1.5, 60.0),
-        ('move_leader', 0.0, 1.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('move_leader', 1.0, 0.0, -5.0, 0.0, 0.3, 0.2, 60.0),
     ]
 
 
