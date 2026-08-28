@@ -93,7 +93,11 @@ class OperatorConsoleConfig:
 class SwarmActionGateway(Protocol):
     """Boundary used by the console core to call existing swarm actions only."""
 
-    def get_leader_status(self) -> VehicleStatus | None:
+    def get_leader_status(
+        self,
+        *,
+        require_new_status: bool = False,
+    ) -> VehicleStatus | None:
         """Return the latest leader status if one has been observed."""
 
     def is_paused(self) -> bool:
@@ -188,7 +192,7 @@ class ConsoleCommandDispatcher:
     def _run_motion_command(self, command: str) -> ConsoleActionResult:
         if self._gateway.is_paused():
             return ConsoleActionResult(False, 'movement command blocked while swarm is paused')
-        leader = self._gateway.get_leader_status()
+        leader = self._gateway.get_leader_status(require_new_status=True)
         if leader is None:
             return ConsoleActionResult(False, 'leader status unavailable for relative command')
 
@@ -322,6 +326,7 @@ class RosSwarmActionGateway:
         self._node = node
         self._config = config
         self._statuses: dict[int, VehicleStatus] = {}
+        self._status_update_counts: dict[int, int] = {}
         self._arm_client = ActionClient(node, ArmSwarm, '/swarm/arm')
         self._takeoff_client = ActionClient(node, TakeoffSwarm, '/swarm/takeoff')
         self._move_client = ActionClient(node, MoveLeader, '/swarm/move_leader')
@@ -342,8 +347,19 @@ class RosSwarmActionGateway:
             for vehicle in FIRST_VERSION_VEHICLES
         ]
 
-    def get_leader_status(self) -> VehicleStatus | None:
-        self._spin_for_status(1)
+    def get_leader_status(
+        self,
+        *,
+        require_new_status: bool = False,
+    ) -> VehicleStatus | None:
+        previous_update_count = self._status_update_counts.get(1, 0)
+        if require_new_status or 1 not in self._statuses:
+            self._spin_for_status(1, previous_update_count)
+        if (
+            require_new_status
+            and self._status_update_counts.get(1, 0) == previous_update_count
+        ):
+            return None
         return self._statuses.get(1)
 
     def is_paused(self) -> bool:
@@ -436,10 +452,16 @@ class RosSwarmActionGateway:
 
     def _handle_status(self, msg: VehicleStatus) -> None:
         self._statuses[msg.vehicle_id] = msg
+        self._status_update_counts[msg.vehicle_id] = (
+            self._status_update_counts.get(msg.vehicle_id, 0) + 1
+        )
 
-    def _spin_for_status(self, vehicle_id: int) -> None:
+    def _spin_for_status(self, vehicle_id: int, previous_update_count: int) -> None:
         deadline = monotonic() + self._config.status_wait_timeout_s
-        while vehicle_id not in self._statuses and monotonic() < deadline:
+        while (
+            self._status_update_counts.get(vehicle_id, 0) == previous_update_count
+            and monotonic() < deadline
+        ):
             self._spin_once()
 
     def _spin_once(self) -> None:

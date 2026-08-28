@@ -20,7 +20,7 @@ class FakeGateway(SwarmActionGateway):
         self.action_results = action_results or {}
         self.calls = []
 
-    def get_leader_status(self):
+    def get_leader_status(self, *, require_new_status=False):
         return self.leader_status
 
     def is_paused(self):
@@ -175,6 +175,62 @@ def test_ros_gateway_subscribes_to_mav_status_topics(monkeypatch):
         '/MAV2/status',
         '/MAV3/status',
     ]
+
+
+def test_ros_gateway_waits_for_a_new_leader_status_before_returning_cached_pose(
+    monkeypatch,
+):
+    class FakeActionClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class FakeNode:
+        def __init__(self):
+            self.callbacks = {}
+
+        def create_subscription(self, _msg_type, topic, callback, _qos):
+            self.callbacks[topic] = callback
+            return topic
+
+    monkeypatch.setattr(operator_console, 'ActionClient', FakeActionClient)
+    node = FakeNode()
+    gateway = RosSwarmActionGateway(
+        node,
+        OperatorConsoleConfig(status_wait_timeout_s=0.1),
+    )
+    gateway._handle_status(leader_status(x=2.0, y=3.0, z=0.09, yaw=0.4))
+
+    def deliver_current_pose(_node, timeout_sec):
+        node.callbacks['/MAV1/status'](
+            leader_status(x=2.0, y=3.0, z=-1.12, yaw=0.4),
+        )
+
+    monkeypatch.setattr(operator_console.rclpy, 'spin_once', deliver_current_pose)
+
+    current = gateway.get_leader_status(require_new_status=True)
+
+    assert (current.x, current.y, current.z, current.yaw) == (2.0, 3.0, -1.12, 0.4)
+
+
+def test_ros_gateway_rejects_a_cached_leader_status_when_no_new_status_arrives(
+    monkeypatch,
+):
+    class FakeActionClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class FakeNode:
+        def create_subscription(self, *_args):
+            return None
+
+    monkeypatch.setattr(operator_console, 'ActionClient', FakeActionClient)
+    gateway = RosSwarmActionGateway(
+        FakeNode(),
+        OperatorConsoleConfig(status_wait_timeout_s=0.0),
+    )
+    gateway._handle_status(leader_status(z=0.09))
+
+    assert gateway.get_leader_status(require_new_status=True) is None
 
 
 def test_field_frame_jog_commands_convert_to_absolute_ned_goal():
