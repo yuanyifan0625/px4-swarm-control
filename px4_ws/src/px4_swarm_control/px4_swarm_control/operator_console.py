@@ -11,6 +11,7 @@ from typing import Callable, Iterable, Protocol
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.qos import QoSProfile
 from rclpy.utilities import remove_ros_args
 
 from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES
@@ -64,6 +65,7 @@ class OperatorConsoleConfig:
     move_position_tolerance_m: float = 0.3
     move_yaw_tolerance_rad: float = 0.2
     status_wait_timeout_s: float = 2.0
+    relative_command_max_status_age_s: float = 0.2
     settle_stable_duration_s: float = SETTLE_STABLE_DURATION_S
     settle_timeout_sec: float = 30.0
     settle_position_tolerance_m: float = FORMATION_POSITION_TOLERANCE_M
@@ -99,6 +101,9 @@ class SwarmActionGateway(Protocol):
         require_new_status: bool = False,
     ) -> VehicleStatus | None:
         """Return the latest leader status if one has been observed."""
+
+    def leader_status_error(self) -> str:
+        """Return the most recent relative-command leader-status failure."""
 
     def is_paused(self) -> bool:
         """Return whether the swarm currently appears paused."""
@@ -194,7 +199,7 @@ class ConsoleCommandDispatcher:
             return ConsoleActionResult(False, 'movement command blocked while swarm is paused')
         leader = self._gateway.get_leader_status(require_new_status=True)
         if leader is None:
-            return ConsoleActionResult(False, 'leader status unavailable for relative command')
+            return ConsoleActionResult(False, self._gateway.leader_status_error())
 
         x, y, z, yaw = leader.x, leader.y, leader.z, leader.yaw
         field_x, field_y, field_up = _field_delta_for_command(command, self._config)
@@ -327,6 +332,7 @@ class RosSwarmActionGateway:
         self._config = config
         self._statuses: dict[int, VehicleStatus] = {}
         self._status_update_counts: dict[int, int] = {}
+        self._leader_status_error = 'leader status unavailable for relative command'
         self._arm_client = ActionClient(node, ArmSwarm, '/swarm/arm')
         self._takeoff_client = ActionClient(node, TakeoffSwarm, '/swarm/takeoff')
         self._move_client = ActionClient(node, MoveLeader, '/swarm/move_leader')
@@ -342,7 +348,7 @@ class RosSwarmActionGateway:
                 VehicleStatus,
                 f'{vehicle.namespace}/status',
                 self._handle_status,
-                10,
+                QoSProfile(depth=1),
             )
             for vehicle in FIRST_VERSION_VEHICLES
         ]
@@ -353,6 +359,7 @@ class RosSwarmActionGateway:
         require_new_status: bool = False,
     ) -> VehicleStatus | None:
         previous_update_count = self._status_update_counts.get(1, 0)
+        self._leader_status_error = 'leader status unavailable for relative command'
         if require_new_status or 1 not in self._statuses:
             self._spin_for_status(1, previous_update_count)
         if (
@@ -360,7 +367,29 @@ class RosSwarmActionGateway:
             and self._status_update_counts.get(1, 0) == previous_update_count
         ):
             return None
-        return self._statuses.get(1)
+        status = self._statuses.get(1)
+        if require_new_status and status is not None and not _status_pose_is_finite(status):
+            self._leader_status_error = 'movement blocked: MAV1 pose is non-finite'
+            return None
+        if (
+            require_new_status
+            and status is not None
+            and (
+                not isfinite(status.last_telemetry_age_sec)
+                or status.last_telemetry_age_sec
+                > self._config.relative_command_max_status_age_s
+            )
+        ):
+            age = status.last_telemetry_age_sec
+            self._leader_status_error = (
+                'movement blocked: MAV1 telemetry stale '
+                f'({age:.2f}s > {self._config.relative_command_max_status_age_s:.2f}s)'
+            )
+            return None
+        return status
+
+    def leader_status_error(self) -> str:
+        return self._leader_status_error
 
     def is_paused(self) -> bool:
         self._spin_once()
@@ -503,6 +532,7 @@ class OperatorConsoleNode(Node):
         self.declare_parameter('move_position_tolerance_m', 0.3)
         self.declare_parameter('move_yaw_tolerance_rad', 0.2)
         self.declare_parameter('status_wait_timeout_s', 2.0)
+        self.declare_parameter('relative_command_max_status_age_s', 0.2)
         self.declare_parameter('settle_stable_duration_s', SETTLE_STABLE_DURATION_S)
         self.declare_parameter('settle_timeout_sec', 30.0)
         self.declare_parameter(
@@ -551,6 +581,9 @@ class OperatorConsoleNode(Node):
             ),
             move_yaw_tolerance_rad=float(self.get_parameter('move_yaw_tolerance_rad').value),
             status_wait_timeout_s=float(self.get_parameter('status_wait_timeout_s').value),
+            relative_command_max_status_age_s=float(
+                self.get_parameter('relative_command_max_status_age_s').value
+            ),
             settle_stable_duration_s=float(
                 self.get_parameter('settle_stable_duration_s').value
             ),

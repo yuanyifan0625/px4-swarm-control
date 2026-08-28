@@ -23,6 +23,9 @@ class FakeGateway(SwarmActionGateway):
     def get_leader_status(self, *, require_new_status=False):
         return self.leader_status
 
+    def leader_status_error(self):
+        return 'leader status unavailable for relative command'
+
     def is_paused(self):
         return self.paused
 
@@ -231,6 +234,42 @@ def test_ros_gateway_rejects_a_cached_leader_status_when_no_new_status_arrives(
     gateway._handle_status(leader_status(z=0.09))
 
     assert gateway.get_leader_status(require_new_status=True) is None
+
+
+def test_ros_gateway_reports_stale_leader_telemetry_for_relative_commands(monkeypatch):
+    class FakeActionClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class FakeNode:
+        def __init__(self):
+            self.callbacks = {}
+
+        def create_subscription(self, _msg_type, topic, callback, _qos):
+            self.callbacks[topic] = callback
+            return topic
+
+    monkeypatch.setattr(operator_console, 'ActionClient', FakeActionClient)
+    node = FakeNode()
+    gateway = RosSwarmActionGateway(
+        node,
+        OperatorConsoleConfig(
+            status_wait_timeout_s=0.1,
+            relative_command_max_status_age_s=0.2,
+        ),
+    )
+    stale = leader_status(z=-1.12)
+    stale.last_telemetry_age_sec = 0.42
+    monkeypatch.setattr(
+        operator_console.rclpy,
+        'spin_once',
+        lambda _node, timeout_sec: node.callbacks['/MAV1/status'](stale),
+    )
+
+    assert gateway.get_leader_status(require_new_status=True) is None
+    assert gateway.leader_status_error() == (
+        'movement blocked: MAV1 telemetry stale (0.42s > 0.20s)'
+    )
 
 
 def test_field_frame_jog_commands_convert_to_absolute_ned_goal():
