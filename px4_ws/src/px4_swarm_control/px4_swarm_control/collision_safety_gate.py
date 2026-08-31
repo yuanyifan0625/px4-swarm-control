@@ -281,8 +281,8 @@ def _slot_fallback_target(
         return None
     assert own_observation is not None
     body_left_sign = 1.0 if slot is Slot.FOLLOWER_LEFT else -1.0
-    delta_x = -sin(leader_yaw) * body_left_sign * config.fallback_step_m
-    delta_y = cos(leader_yaw) * body_left_sign * config.fallback_step_m
+    delta_x = -cos(leader_yaw) * body_left_sign * config.fallback_step_m
+    delta_y = sin(leader_yaw) * body_left_sign * config.fallback_step_m
     if abs(delta_x) < 1e-12:
         delta_x = 0.0
     if abs(delta_y) < 1e-12:

@@ -1,4 +1,7 @@
 """Formation geometry helpers for the PX4 swarm-control package."""
+"""I define the forward and left directions as positive. 
+This part is mainly used to convert that definition into the NED coordinate frame. """
+"""This transition is only for real coordinate in ncrl flight"""
 
 from __future__ import annotations
 
@@ -103,8 +106,8 @@ def body_offset_to_world(
     forward_m, left_m, up_m = body_offset
     yaw = leader_setpoint.yaw
     # 以 leader yaw 旋轉 body offset，保護左右隊形在轉向後仍維持相對方向。
-    world_dx = forward_m * cos(yaw) - left_m * sin(yaw)
-    world_dy = forward_m * sin(yaw) + left_m * cos(yaw)
+    world_dx = -forward_m * sin(yaw) - left_m * cos(yaw)
+    world_dy = -forward_m * cos(yaw) + left_m * sin(yaw)
 
     return PositionYawSetpoint(
         x=leader_setpoint.x + world_dx,
@@ -116,7 +119,7 @@ def body_offset_to_world(
 
 def _slot_left_distance(slot: Slot, lateral_spacing_m: float) -> float:
     if slot is Slot.FOLLOWER_LEFT:
-        return -lateral_spacing_m
-    if slot is Slot.FOLLOWER_RIGHT:
         return  lateral_spacing_m
+    if slot is Slot.FOLLOWER_RIGHT:
+        return  -lateral_spacing_m
     raise ValueError(f'unsupported follower slot: {slot}')
