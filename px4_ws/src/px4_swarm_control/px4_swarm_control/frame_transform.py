@@ -1,12 +1,16 @@
-"""Fixed operator field-frame to PX4 local NED transformations."""
+"""Fixed field-frame to measured PX4 local-coordinate transformations."""
 
 from __future__ import annotations
 
-def field_delta_to_ned_delta(
+def field_delta_to_px4_delta(
     *,
     field_x: float,
     field_y: float,
     field_up: float,
 ) -> tuple[float, float, float]:
-    """Convert fixed field +X/+Y/up into local NED +X/+Y/-Z."""
-    return (-float(field_x), -float(field_y), -float(field_up))
+    """Convert field North/West/up into PX4 East/South/Down.
+
+    Field +X is North and therefore PX4 -y; field +Y is West and therefore
+    PX4 -x; field up is PX4 -z.  All three vehicles share this origin/frame.
+    """
+    return (-float(field_y), -float(field_x), -float(field_up))

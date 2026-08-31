@@ -155,9 +155,53 @@ def test_missing_last_safe_target_uses_slot_direction_fallback():
     )
 
     assert left.holding is True
-    assert left.target == PositionYawSetpoint(1.0, 2.3, -1.0, 0.4)
+    assert left.target == PositionYawSetpoint(0.7, 2.0, -1.0, 0.4)
     assert right.holding is True
-    assert right.target == PositionYawSetpoint(1.3, 2.0, -1.0, 0.4)
+    assert right.target == PositionYawSetpoint(1.0, 1.7, -1.0, 0.4)
+
+
+def test_left_slot_fallback_matches_every_cardinal_yaw():
+    candidate = PositionYawSetpoint(9.0, 9.0, -1.0, 1.0)
+    stale_peer = {1: observation(1, 2.0, 2.0, age_s=5.0)}
+    expected_xy = {
+        0.0: (0.7, 2.0),
+        pi / 2.0: (1.0, 2.3),
+        pi: (1.3, 2.0),
+        -pi / 2.0: (1.0, 1.7),
+    }
+
+    for yaw, (x, y) in expected_xy.items():
+        decision = CollisionSafetyGate(CollisionSafetyConfig()).evaluate(
+            candidate_target=candidate,
+            own_observation=observation(2, 1.0, 2.0, yaw=0.4),
+            peer_observations=stale_peer,
+            slot=Slot.FOLLOWER_LEFT,
+            leader_yaw=yaw,
+            now_s=0.0,
+        )
+        assert decision.target == PositionYawSetpoint(x, y, -1.0, 0.4)
+
+
+def test_right_slot_fallback_matches_every_cardinal_yaw():
+    candidate = PositionYawSetpoint(9.0, 9.0, -1.0, 1.0)
+    stale_peer = {1: observation(1, 2.0, 2.0, age_s=5.0)}
+    expected_xy = {
+        0.0: (1.3, 2.0),
+        pi / 2.0: (1.0, 1.7),
+        pi: (0.7, 2.0),
+        -pi / 2.0: (1.0, 2.3),
+    }
+
+    for yaw, (x, y) in expected_xy.items():
+        decision = CollisionSafetyGate(CollisionSafetyConfig()).evaluate(
+            candidate_target=candidate,
+            own_observation=observation(3, 1.0, 2.0, yaw=0.4),
+            peer_observations=stale_peer,
+            slot=Slot.FOLLOWER_RIGHT,
+            leader_yaw=yaw,
+            now_s=0.0,
+        )
+        assert decision.target == PositionYawSetpoint(x, y, -1.0, 0.4)
 
 
 def test_follower_never_accepts_candidate_target_inside_peer_minimum_distance():

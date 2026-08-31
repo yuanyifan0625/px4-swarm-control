@@ -43,10 +43,13 @@ def test_namespace_scaffold_uses_role_independent_vehicle_names():
     assert VEHICLE_NAMESPACES == ("/MAV1", "/MAV2", "/MAV3")
 
 
-def test_config_installs_one_final_manual_only():
+def test_config_installs_final_manual_and_real_hardware_validation():
     config = Path(__file__).parents[1] / 'config'
 
-    assert sorted(path.name for path in config.glob('*.md')) == ['FINAL_MANUAL.zh.md']
+    assert sorted(path.name for path in config.glob('*.md')) == [
+        'FINAL_MANUAL.zh.md',
+        'REAL_HARDWARE_COORDINATE_VALIDATION.zh.md',
+    ]
 
 
 def test_three_vehicle_config_file_names_fixed_namespace_layout():

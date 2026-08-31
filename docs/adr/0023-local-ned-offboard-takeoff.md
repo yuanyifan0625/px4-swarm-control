@@ -1,4 +1,4 @@
-# ADR 0023: Use local-NED Offboard position control for takeoff
+# ADR 0023: Use measured PX4-local Offboard position control for takeoff
 
 ## Status
 
@@ -6,7 +6,7 @@ Accepted
 
 ## Decision
 
-The swarm vehicle node starts every takeoff from fresh PX4 local-NED position
+The swarm vehicle node starts every takeoff from fresh measured PX4-local position
 telemetry. It warms up a local vertical `TrajectorySetpoint`, requests
 Offboard, waits for PX4 telemetry to report Offboard, then requests ARM. After
 the local-NED height gate, it switches to the full staging target.
@@ -20,10 +20,12 @@ the landing-mode and landing-detection safety behavior.
 
 ## Consequences
 
-Each vehicle uses its own local origin; this decision does not align local
-origins or assert that raw coordinates are shared between vehicles. A takeoff
-timeout sends PAUSE, which holds the latest local pose or last safe setpoint
-and requires a new staging anchor for another attempt.
+For this real-hardware deployment MAV1, MAV2, and MAV3 share one local origin
+and the same measured axes: x=East, y=South, z=Down. The fixed field frame is
+X=North, Y=West, Z=Up, so operator field jogs convert once at the console seam
+to PX4 (-y, -x, -z). A takeoff timeout sends PAUSE, which holds the latest
+local pose or last safe setpoint and requires a new staging anchor for another
+attempt.
 
 ## TDD record
 

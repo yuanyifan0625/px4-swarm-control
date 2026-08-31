@@ -50,8 +50,9 @@ ros2 run px4_swarm_control operator_console
 ## Takeoff 驗證
 
 確認 `/MAV1`、`/MAV2`、`/MAV3` 的 local-position 與 status topics 都持續更新。
-每台 PX4 使用自己的 local-NED origin；不能將三台 raw `x/y/z` 視為 shared
-world coordinates。輸入 console 的 `1` 前，MAV1 必須提供 fresh staging anchor。
+本實機部署假設三台 PX4 共用同一個 local origin 與座標軸：x=East、y=South、
+z=Down。操作場地座標為 +X=North、+Y=West、+Z=Up；因此 console 的 +X/+Y/up
+分別轉成 PX4 -y/-x/-z。輸入 console 的 `1` 前，MAV1 必須提供 fresh staging anchor。
 
 起飛時每台先發布 local 垂直 target，再進入 Offboard、ARM，通過 0.1 m height
 gate 後才切換完整 staging target。驗收時保留 bounded snapshots：

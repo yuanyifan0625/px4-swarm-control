@@ -15,7 +15,7 @@ from rclpy.qos import QoSProfile
 from rclpy.utilities import remove_ros_args
 
 from px4_swarm_control.bridge_config import FIRST_VERSION_VEHICLES
-from px4_swarm_control.frame_transform import field_delta_to_ned_delta
+from px4_swarm_control.frame_transform import field_delta_to_px4_delta
 from px4_swarm_control.geometry import (
     body_offset_to_world,
     formation_body_offset,
@@ -203,14 +203,14 @@ class ConsoleCommandDispatcher:
 
         x, y, z, yaw = leader.x, leader.y, leader.z, leader.yaw
         field_x, field_y, field_up = _field_delta_for_command(command, self._config)
-        ned_x, ned_y, ned_z = field_delta_to_ned_delta(
+        px4_x, px4_y, px4_z = field_delta_to_px4_delta(
             field_x=field_x,
             field_y=field_y,
             field_up=field_up,
         )
-        x += ned_x
-        y += ned_y
-        z += ned_z
+        x += px4_x
+        y += px4_y
+        z += px4_z
         if command == '5':
             yaw = _normalize_yaw_rad(yaw + self._config.yaw_step_rad)
         elif command == 'c':
@@ -679,12 +679,12 @@ def _help_text() -> str:
         '  h: help\n'
         '  0: ArmSwarm without takeoff\n'
         '  1: TakeoffSwarm\n'
-        '  2: move leader field +X step (field X -> NED +Y)\n'
-        '  x: move leader field -X step (field -X -> NED -Y)\n'
-        '  3: move leader field +Y step (field Y -> NED +X)\n'
-        '  y: move leader field -Y step (field -Y -> NED -X)\n'
-        '  4: move leader field up by altitude step (NED z -= step)\n'
-        '  z: move leader field down by altitude step (NED z += step)\n'
+        '  2: move leader field +X / North step (PX4 y -= step)\n'
+        '  x: move leader field -X / South step (PX4 y += step)\n'
+        '  3: move leader field +Y / West step (PX4 x -= step)\n'
+        '  y: move leader field -Y / East step (PX4 x += step)\n'
+        '  4: move leader field up by altitude step (PX4 z -= step)\n'
+        '  z: move leader field down by altitude step (PX4 z += step)\n'
         '  5: rotate leader yaw + step\n'
         '  c: rotate leader yaw - step\n'
         '  6: ChangeFormation vee\n'

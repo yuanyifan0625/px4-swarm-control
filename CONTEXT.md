@@ -12,14 +12,15 @@
   tolerance before the operator workflow treats it as settled.
 - **Launch-time override**: A ROS 2 launch argument that changes a runtime
   parameter for one launch invocation without editing the shared YAML defaults.
-- **PX4 local NED frame**: The local coordinate frame exposed by PX4 telemetry
-  over DDS, where x/y are local horizontal axes and z is positive downward.
+- **Measured PX4 local frame**: The real-vehicle coordinate frame exposed by
+  PX4 telemetry over DDS: x is East, y is South, and z is Down. MAV1, MAV2,
+  and MAV3 share one origin and this same axis convention.
 - **Gazebo world frame**: The simulator visual/world coordinate frame, which is
   not the same axis convention as the PX4 local NED frame.
 - **Field frame**: The human-defined test-field coordinate frame used by the
   operator to describe field +X, field +Y, and field up. It is fixed to the
   field and does not rotate when the leader changes yaw.
-- **Canonical control frame**: The PX4 local NED frame used by the swarm
+- **Canonical control frame**: The measured PX4 local frame used by the swarm
   controller for positions, formation geometry, staging, and vehicle
   setpoints. Operator-facing field commands are converted before entering
   this frame.
@@ -29,16 +30,14 @@
 - **Collision safety hold**: A conservative state that republishes the last
   position target that passed the separation check instead of accepting a new
   formation target while the safety condition is unresolved.
-- **Fixed field-to-NED mapping**: The stable signed axis mapping from the
-  operator's field frame into PX4 local NED. It is shared by SITL and real
-  vehicles and is not recalculated from leader yaw during flight.
+- **Fixed field-to-PX4 mapping**: The stable signed axis mapping from the
+  operator's field frame into the measured PX4 local frame: North maps to -y,
+  West maps to -x, and up maps to -z. It is not recalculated from leader yaw.
 - **Formation slot offset**: A follower's relative position from the leader,
   expressed in the leader body frame and rotated into the canonical control
   frame using the leader yaw.
 - **Axis probe**: A preflight diagnostic that observes manual or commanded
   motion and verifies which PX4 local NED axis and sign changed.
-- **Field-frame console**: An operator console that accepts human field-frame
-  movement commands and translates them into the existing swarm action goals.
 - **Offboard-setpoint acceptance**: PX4's explicit indication that the current
   flight mode accepts Offboard trajectory setpoints. It is not eligibility to
   enter Offboard mode and not the result of pre-flight checks.

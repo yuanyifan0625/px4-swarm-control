@@ -77,24 +77,24 @@ def test_vee_and_line_abreast_offsets_keep_left_right_signs():
 
     assert formation_body_offset(FormationMode.VEE, Slot.FOLLOWER_LEFT, geometry) == (
         -1.0,
-        -1.0,
+        1.0,
         0.0,
     )
     assert formation_body_offset(FormationMode.VEE, Slot.FOLLOWER_RIGHT, geometry) == (
         -1.0,
-        1.0,
+        -1.0,
         0.0,
     )
     assert formation_body_offset(
         FormationMode.LINE_ABREAST,
         Slot.FOLLOWER_LEFT,
         geometry,
-    ) == (0.0, -1.0, 0.0)
+    ) == (0.0, 1.0, 0.0)
     assert formation_body_offset(
         FormationMode.LINE_ABREAST,
         Slot.FOLLOWER_RIGHT,
         geometry,
-    ) == (0.0, 1.0, 0.0)
+    ) == (0.0, -1.0, 0.0)
 
 
 def test_staging_positions_use_leader_initial_yaw_and_keep_left_slot_left():
@@ -110,11 +110,11 @@ def test_staging_positions_use_leader_initial_yaw_and_keep_left_slot_left():
 
     assert_setpoint_close(
         left,
-        PositionYawSetpoint(x=11.0, y=19.0, z=-5.0, yaw=pi / 2.0),
+        PositionYawSetpoint(x=11.0, y=21.0, z=-5.0, yaw=pi / 2.0),
     )
     assert_setpoint_close(
         right,
-        PositionYawSetpoint(x=9.0, y=19.0, z=-5.0, yaw=pi / 2.0),
+        PositionYawSetpoint(x=11.0, y=19.0, z=-5.0, yaw=pi / 2.0),
     )
 
 
@@ -131,8 +131,31 @@ def test_body_frame_following_rotates_with_current_leader_yaw():
 
     assert_setpoint_close(
         left_world,
-        PositionYawSetpoint(x=9.0, y=21.0, z=-5.0, yaw=-pi / 2.0),
+        PositionYawSetpoint(x=9.0, y=19.0, z=-5.0, yaw=-pi / 2.0),
     )
+
+
+def test_line_abreast_left_slot_matches_every_cardinal_yaw():
+    leader = PositionYawSetpoint(x=10.0, y=20.0, z=-5.0, yaw=0.0)
+    geometry = FormationGeometry(line_abreast_lateral_spacing_m=1.0)
+    left_offset = formation_body_offset(
+        FormationMode.LINE_ABREAST,
+        Slot.FOLLOWER_LEFT,
+        geometry,
+    )
+
+    expected_xy = {
+        0.0: (9.0, 20.0),
+        pi / 2.0: (10.0, 21.0),
+        pi: (11.0, 20.0),
+        -pi / 2.0: (10.0, 19.0),
+    }
+    for yaw, (x, y) in expected_xy.items():
+        target = body_offset_to_world(
+            PositionYawSetpoint(leader.x, leader.y, leader.z, yaw),
+            left_offset,
+        )
+        assert_setpoint_close(target, PositionYawSetpoint(x, y, -5.0, yaw))
 
 
 def test_leader_slot_is_centered_for_staging_and_formations():

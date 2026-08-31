@@ -1,7 +1,8 @@
-"""Formation geometry helpers for the PX4 swarm-control package."""
-"""I define the forward and left directions as positive. 
-This part is mainly used to convert that definition into the NED coordinate frame. """
-"""This transition is only for real coordinate in ncrl flight"""
+"""Formation geometry in the measured real-vehicle PX4 local frame.
+
+Body offsets use positive forward, left, and up.  PX4 local x/y/z are
+East/South/Down, with yaw 0=North and yaw +pi/2=West.
+"""
 
 from __future__ import annotations
 
@@ -102,10 +103,11 @@ def body_offset_to_world(
     leader_setpoint: PositionYawSetpoint,
     body_offset: Vector3,
 ) -> PositionYawSetpoint:
-    """Rotate a leader body-frame offset into the world frame."""
+    """Rotate a positive-forward/left/up body offset into PX4 local coordinates."""
     forward_m, left_m, up_m = body_offset
     yaw = leader_setpoint.yaw
-    # 以 leader yaw 旋轉 body offset，保護左右隊形在轉向後仍維持相對方向。
+    # Measured contract: yaw=0 points North (-y), and body-left points West
+    # (-x).  This preserves body-relative formation slots at every yaw.
     world_dx = -forward_m * sin(yaw) - left_m * cos(yaw)
     world_dy = -forward_m * cos(yaw) + left_m * sin(yaw)
 
@@ -119,7 +121,7 @@ def body_offset_to_world(
 
 def _slot_left_distance(slot: Slot, lateral_spacing_m: float) -> float:
     if slot is Slot.FOLLOWER_LEFT:
-        return  lateral_spacing_m
+        return lateral_spacing_m
     if slot is Slot.FOLLOWER_RIGHT:
-        return  -lateral_spacing_m
+        return -lateral_spacing_m
     raise ValueError(f'unsupported follower slot: {slot}')

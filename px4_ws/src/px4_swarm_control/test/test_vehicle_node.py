@@ -256,7 +256,7 @@ def test_follower_left_derives_vee_setpoint_from_fresh_leader_status():
 
     assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(9.0, 19.0, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 21.0, -5.0, 0.0),
     ]
 
 
@@ -273,7 +273,7 @@ def test_follower_right_derives_vee_setpoint_from_fresh_leader_status():
 
     assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(9.0, 21.0, -5.0, 0.0),
+        PositionYawSetpoint(11.0, 21.0, -5.0, 0.0),
     ]
 
 
@@ -292,7 +292,7 @@ def test_follower_uses_current_formation_mode_topic_for_local_offset():
     core.control_tick()
 
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(9.0, 19.0, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 21.0, -5.0, 0.0),
     ]
 
 
@@ -311,7 +311,7 @@ def test_follower_line_abreast_mode_uses_same_row_body_frame_offset():
     core.control_tick()
 
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(10.0, 19.0, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 20.0, -5.0, 0.0),
     ]
 
 
@@ -340,8 +340,8 @@ def test_follower_control_tick_enters_collision_hold_and_publishes_slot_fallback
     clock[0] = 1.0
     core.control_tick()
 
-    assert px4_interface.setpoints[0] == PositionYawSetpoint(-1.0, 1.0, -1.0, 0.0)
-    assert px4_interface.setpoints[1] == PositionYawSetpoint(0.0, 0.3, -1.0, 0.0)
+    assert px4_interface.setpoints[0] == PositionYawSetpoint(-1.0, 3.0, -1.0, 0.0)
+    assert px4_interface.setpoints[1] == PositionYawSetpoint(-0.3, 0.0, -1.0, 0.0)
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
 
 
@@ -383,7 +383,7 @@ def test_follower_freezes_last_safe_target_when_leader_telemetry_becomes_stale()
     )
     core.control_tick()
 
-    expected = PositionYawSetpoint(9.0, 19.0, -5.0, 0.0)
+    expected = PositionYawSetpoint(9.0, 21.0, -5.0, 0.0)
     assert px4_interface.setpoints == [expected, expected]
     assert px4_interface.safe_hover_calls == 0
     assert core.vehicle_level_state is VehicleLevelState.FAILSAFE
@@ -402,7 +402,7 @@ def test_follower_freezes_last_safe_target_when_own_telemetry_becomes_stale():
     px4_interface.stale = True
     core.control_tick()
 
-    expected = PositionYawSetpoint(9.0, 19.0, -5.0, 0.0)
+    expected = PositionYawSetpoint(9.0, 21.0, -5.0, 0.0)
     assert px4_interface.setpoints == [expected, expected]
     assert px4_interface.safe_hover_calls == 0
     assert core.vehicle_level_state is VehicleLevelState.FAILSAFE
@@ -509,8 +509,8 @@ def test_follower_pause_resume_waits_for_fresh_following_leader_before_following
 
     assert core.vehicle_level_state is VehicleLevelState.HOLDING
     assert px4_interface.setpoints == [
-        PositionYawSetpoint(9.0, 19.0, -5.0, 0.0),
-        PositionYawSetpoint(9.0, 19.0, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 21.0, -5.0, 0.0),
+        PositionYawSetpoint(9.0, 21.0, -5.0, 0.0),
     ]
     assert px4_interface.safe_hover_calls >= 1
 
@@ -1021,22 +1021,22 @@ def peer_status(
 
 def prepare_safe_follower_telemetry(core, px4_interface, vehicle_id):
     if vehicle_id == 'MAV2':
-        own_y = 19.0
+        own_x, own_y = 9.0, 21.0
         peer_id = 3
-        peer_y = 21.0
+        peer_x, peer_y = 11.0, 21.0
         peer_slot = 'follower_right'
     else:
-        own_y = 21.0
+        own_x, own_y = 11.0, 21.0
         peer_id = 2
-        peer_y = 19.0
+        peer_x, peer_y = 9.0, 21.0
         peer_slot = 'follower_left'
     px4_interface.state = vehicle_state(
         vehicle_id=vehicle_id,
-        x=9.0,
+        x=own_x,
         y=own_y,
         z=-5.0,
         vehicle_level_state=VehicleLevelState.FOLLOWING,
     )
     core.handle_peer_status(
-        peer_status(peer_id, x=9.0, y=peer_y, z=-5.0, slot=peer_slot)
+        peer_status(peer_id, x=peer_x, y=peer_y, z=-5.0, slot=peer_slot)
     )
