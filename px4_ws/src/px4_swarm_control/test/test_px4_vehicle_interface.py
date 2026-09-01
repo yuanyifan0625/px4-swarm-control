@@ -19,6 +19,7 @@ from px4_swarm_control.models import (
     PositionYawSetpoint,
     VehicleLevelState,
 )
+from px4_swarm_control.frame_transform import CoordinateProfile
 from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MAIN_MODE_AUTO
 from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MAIN_MODE_OFFBOARD
 from px4_swarm_control.px4_vehicle_interface import PX4_CUSTOM_MODE_ENABLED
@@ -63,6 +64,18 @@ def make_interface(now_us=123456, namespace='/MAV2', px4_target_system=3):
         px4_namespace=namespace,
         px4_target_system=px4_target_system,
         telemetry_timeout_s=0.5,
+    )
+
+
+def make_gazebo_interface(now_us=123456):
+    return Px4VehicleInterface(
+        node=FakeNode(now_us=now_us),
+        vehicle_id='MAV2',
+        px4_namespace='/MAV2',
+        px4_target_system=2,
+        coordinate_profile=CoordinateProfile.gazebo_enu_common_world(
+            origin_enu=(-1.0, 1.0, 0.0),
+        ),
     )
 
 
@@ -119,6 +132,18 @@ def test_publish_position_yaw_setpoint_maps_internal_model_to_px4_message():
     assert all(isnan(value) for value in msg.acceleration)
     assert all(isnan(value) for value in msg.jerk)
     assert isnan(msg.yawspeed)
+
+
+def test_gazebo_profile_converts_common_setpoint_to_mav_raw_trajectory_setpoint():
+    interface = make_gazebo_interface(now_us=3000)
+
+    interface.publish_position_yaw_setpoint(
+        PositionYawSetpoint(x=2.0, y=3.0, z=0.5, yaw=0.102),
+    )
+
+    msg = interface.trajectory_setpoint_publisher.messages[-1]
+    assert list(msg.position) == pytest.approx([2.0, 3.0, -0.5])
+    assert msg.yaw == pytest.approx(3.141592653589793 / 2.0)
 
 
 def test_vehicle_commands_never_publish_nav_takeoff():
@@ -267,6 +292,33 @@ def test_vehicle_state_converts_latest_px4_telemetry_to_internal_model():
     assert state.telemetry_age_s == 0.5
     assert state.vehicle_level_state is VehicleLevelState.IDLE
     assert state.landed is False
+
+
+def test_gazebo_profile_converts_raw_telemetry_to_common_vehicle_state():
+    interface = make_gazebo_interface(now_us=1_500_000)
+    local_position = VehicleLocalPosition()
+    local_position.timestamp = 1_000_000
+    local_position.x = 2.0
+    local_position.y = 3.0
+    local_position.z = -0.5
+    local_position.vx = 0.1
+    local_position.vy = 0.2
+    local_position.vz = -0.3
+    local_position.heading = 3.141592653589793 / 2.0
+    vehicle_status = SimpleNamespace(
+        arming_state=VehicleStatus.ARMING_STATE_ARMED,
+        nav_state=VehicleStatus.NAVIGATION_STATE_OFFBOARD,
+        accepts_offboard_setpoints=True,
+        pre_flight_checks_pass=True,
+    )
+    interface.handle_vehicle_local_position(local_position)
+    interface.handle_vehicle_status(vehicle_status)
+
+    state = interface.vehicle_state()
+
+    assert state.position == pytest.approx((2.0, 3.0, 0.5))
+    assert state.velocity == pytest.approx((0.2, 0.1, 0.3))
+    assert state.yaw == pytest.approx(0.102)
 
 
 def test_vehicle_state_treats_missing_offboard_acceptance_as_unavailable():

@@ -24,6 +24,9 @@ from px4_swarm_control.follower_controller import (
     leader_status_is_fresh,
     leader_status_setpoint,
 )
+from px4_swarm_control.frame_transform import CoordinateProfile
+from px4_swarm_control.frame_transform import GAZEBO_ENU_COMMON_WORLD
+from px4_swarm_control.frame_transform import RAW_PX4_LOCAL
 from px4_swarm_control.geometry import FormationGeometry
 from px4_swarm_control.models import (
     FormationMode as InternalFormationMode,
@@ -68,6 +71,7 @@ class VehicleNodeConfig:
     safety_minimum_horizontal_distance_m: float = 0.7
     safety_transition_duration_s: float = 1.0
     safety_fallback_step_m: float = 0.3
+    coordinate_profile: CoordinateProfile = CoordinateProfile.raw_px4_local()
 
 
 class _TakeoffPhase(str, Enum):
@@ -583,6 +587,7 @@ class VehicleNode(Node):
             px4_namespace=self.config.px4_namespace,
             px4_target_system=self.config.px4_target_system,
             telemetry_timeout_s=self.config.telemetry_timeout_s,
+            coordinate_profile=self.config.coordinate_profile,
         )
         self.status_publisher = self.create_publisher(
             SwarmVehicleStatus,
@@ -651,6 +656,10 @@ class VehicleNode(Node):
         self.declare_parameter('control_loop_hz', 20.0)
         self.declare_parameter('status_loop_hz', 5.0)
         self.declare_parameter('telemetry_timeout_s', 0.5)
+        self.declare_parameter('coordinate_profile', RAW_PX4_LOCAL)
+        self.declare_parameter('common_origin_e_m', 0.0)
+        self.declare_parameter('common_origin_n_m', 0.0)
+        self.declare_parameter('common_origin_u_m', 0.0)
         self.declare_parameter('takeoff_altitude_tolerance_m', 0.1)
         self.declare_parameter('offboard_warmup_s', 1.0)
         self.declare_parameter('takeoff_command_retry_s', 1.0)
@@ -678,6 +687,10 @@ class VehicleNode(Node):
             'control_loop_hz',
             'status_loop_hz',
             'telemetry_timeout_s',
+            'coordinate_profile',
+            'common_origin_e_m',
+            'common_origin_n_m',
+            'common_origin_u_m',
             'takeoff_altitude_tolerance_m',
             'offboard_warmup_s',
             'takeoff_command_retry_s',
@@ -731,6 +744,7 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         values.get('safety_transition_duration_s', 1.0)
     )
     safety_fallback_step_m = float(values.get('safety_fallback_step_m', 0.3))
+    coordinate_profile = _coordinate_profile_from_values(values)
 
     if control_loop_hz <= 0.0:
         raise ValueError('control_loop_hz must be positive')
@@ -783,9 +797,25 @@ def parse_vehicle_node_config(values: Dict[str, Any]) -> VehicleNodeConfig:
         safety_minimum_horizontal_distance_m=safety_minimum_horizontal_distance_m,
         safety_transition_duration_s=safety_transition_duration_s,
         safety_fallback_step_m=safety_fallback_step_m,
+        coordinate_profile=coordinate_profile,
     )
     _validate_first_version_mapping(config)
     return config
+
+
+def _coordinate_profile_from_values(values: Dict[str, Any]) -> CoordinateProfile:
+    name = str(values.get('coordinate_profile', RAW_PX4_LOCAL))
+    if name == RAW_PX4_LOCAL:
+        return CoordinateProfile.raw_px4_local()
+    if name == GAZEBO_ENU_COMMON_WORLD:
+        return CoordinateProfile.gazebo_enu_common_world(
+            origin_enu=(
+                float(values.get('common_origin_e_m', 0.0)),
+                float(values.get('common_origin_n_m', 0.0)),
+                float(values.get('common_origin_u_m', 0.0)),
+            ),
+        )
+    raise ValueError(f'unsupported coordinate_profile: {name}')
 
 
 def default_vehicle_node_configs() -> Tuple[

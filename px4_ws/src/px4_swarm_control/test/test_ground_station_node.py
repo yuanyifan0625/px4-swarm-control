@@ -95,10 +95,10 @@ def test_takeoff_action_starts_mission_without_reporting_success_before_staging(
     assert isinstance(leader, VehicleSetpoint)
     assert (leader.x, leader.y, leader.z, leader.yaw) == (0.0, 0.0, -5.0, 0.0)
     assert isclose(left.x, -1.0, abs_tol=1e-6)
-    assert isclose(left.y, -1.0, abs_tol=1e-6)
+    assert isclose(left.y, 1.0, abs_tol=1e-6)
     assert (left.z, left.yaw) == (-5.0, 0.0)
     assert isclose(right.x, -1.0, abs_tol=1e-6)
-    assert isclose(right.y, 1.0, abs_tol=1e-6)
+    assert isclose(right.y, -1.0, abs_tol=1e-6)
     assert (right.z, right.yaw) == (-5.0, 0.0)
     assert logger.infos[-1].startswith('swarm mission idle -> taking_off')
 
@@ -128,9 +128,9 @@ def test_takeoff_staging_uses_fresh_leader_position_and_yaw_as_anchor():
     assert isclose(leader.y, 20.0, abs_tol=1e-6)
     assert isclose(leader.z, -1.3, abs_tol=1e-6)
     assert isclose(leader.yaw, 1.5707963267948966, abs_tol=1e-6)
-    assert isclose(left.x, 11.0, abs_tol=1e-6)
+    assert isclose(left.x, 9.0, abs_tol=1e-6)
     assert isclose(left.y, 19.0, abs_tol=1e-6)
-    assert isclose(right.x, 9.0, abs_tol=1e-6)
+    assert isclose(right.x, 11.0, abs_tol=1e-6)
     assert isclose(right.y, 19.0, abs_tol=1e-6)
 
 
@@ -704,7 +704,7 @@ def test_change_formation_progress_and_success_wait_for_followers_inside_toleran
         vehicle_status(
             2,
             x=10.0,
-            y=19.0,
+            y=21.0,
                 z=-5.0,
             yaw=0.1,
             slot='follower_left',
@@ -733,7 +733,7 @@ def test_change_formation_progress_and_success_wait_for_followers_inside_toleran
         vehicle_status(
             3,
             x=10.0,
-            y=21.0,
+            y=19.0,
             z=-5.0,
             yaw=0.19,
             slot='follower_right',
@@ -844,7 +844,7 @@ def test_change_formation_rejects_stale_status_and_wrong_follower_slots():
         ),
     )
 
-    assert core.change_formation_feedback().progress == 0.0
+    assert core.change_formation_feedback().progress == 0.5
     assert core.change_formation_result() is None
 
 
@@ -1189,7 +1189,7 @@ def test_republish_staging_setpoints_resends_current_targets_for_all_vehicles():
         publishers.vehicle_setpoints[2].messages[-1].z,
     )
     assert isclose(left[0], -1.0, abs_tol=1e-6)
-    assert isclose(left[1], -1.0, abs_tol=1e-6)
+    assert isclose(left[1], 1.0, abs_tol=1e-6)
     assert left[2] == -5.0
 
 
@@ -1219,8 +1219,8 @@ def test_vehicle_status_detects_all_staged_and_logs_progress_once():
 
     for vehicle_id, point in (
         (1, (0.1, 0.1, -5.0)),
-        (2, (-1.0, -1.0, -5.0)),
-        (3, (-1.0, 1.0, -5.0)),
+        (2, (-1.0, 1.0, -5.0)),
+        (3, (-1.0, -1.0, -5.0)),
     ):
         status = VehicleStatus()
         status.vehicle_id = vehicle_id
@@ -1339,8 +1339,8 @@ def test_ground_station_node_starts_under_swarm_namespace_with_actions(monkeypat
 def publish_staged_statuses(core, *, altitude_m=5.0):
     for vehicle_id, point in (
         (1, (0.0, 0.0, -altitude_m)),
-        (2, (-1.0, -1.0, -altitude_m)),
-        (3, (-1.0, 1.0, -altitude_m)),
+        (2, (-1.0, 1.0, -altitude_m)),
+        (3, (-1.0, -1.0, -altitude_m)),
     ):
         status = VehicleStatus()
         status.vehicle_id = vehicle_id

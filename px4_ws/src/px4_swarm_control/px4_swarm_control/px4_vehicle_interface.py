@@ -16,6 +16,7 @@ from px4_msgs.msg import (
     VehicleStatus as Px4VehicleStatus,
 )
 from px4_swarm_control.bridge_config import PX4_V117, versioned_topic_suffix
+from px4_swarm_control.frame_transform import CoordinateProfile
 from px4_swarm_control.models import (
     CommandStatus,
     PositionYawSetpoint,
@@ -43,6 +44,7 @@ class Px4VehicleInterface:
         px4_target_system: int = 1,
         telemetry_timeout_s: float = 0.5,
         now_us: Optional[Callable[[Any], int]] = None,
+        coordinate_profile: Optional[CoordinateProfile] = None,
     ) -> None:
         self.node = node
         self.vehicle_id = vehicle_id
@@ -50,6 +52,7 @@ class Px4VehicleInterface:
         self.px4_target_system = _validate_target_system(px4_target_system)
         self.telemetry_timeout_s = telemetry_timeout_s
         self._now_us = now_us or _node_now_us
+        self.coordinate_profile = coordinate_profile or CoordinateProfile.raw_px4_local()
         self.vehicle_level_state = VehicleLevelState.IDLE
         self.last_command_result: Optional[VehicleCommandResult] = None
         self._last_setpoint: Optional[PositionYawSetpoint] = None
@@ -120,14 +123,18 @@ class Px4VehicleInterface:
         self.offboard_control_mode_publisher.publish(msg)
 
     def publish_position_yaw_setpoint(self, setpoint: PositionYawSetpoint) -> None:
+        raw_pose = self.coordinate_profile.common_to_raw_pose(
+            (setpoint.x, setpoint.y, setpoint.z),
+            setpoint.yaw,
+        )
         msg = TrajectorySetpoint()
         msg.timestamp = self._timestamp_us()
         # 只填 position/yaw，其餘 setpoint 設 NaN，避免 PX4 同時追蹤多組控制目標。
-        msg.position = [setpoint.x, setpoint.y, setpoint.z]
+        msg.position = list(raw_pose.position)
         msg.velocity = [nan, nan, nan]
         msg.acceleration = [nan, nan, nan]
         msg.jerk = [nan, nan, nan]
-        msg.yaw = setpoint.yaw
+        msg.yaw = raw_pose.yaw
         msg.yawspeed = nan
         self._last_setpoint = setpoint
         self.trajectory_setpoint_publisher.publish(msg)
@@ -205,11 +212,18 @@ class Px4VehicleInterface:
             VehicleLevelState.LANDED if landed else self.vehicle_level_state
         )
         # PX4 telemetry 在邊界轉成 internal model，保護 controller 不依賴 raw px4_msgs 欄位。
+        common_pose = self.coordinate_profile.raw_to_common_pose(
+            (local_position.x, local_position.y, local_position.z),
+            local_position.heading,
+        )
+        common_velocity = self.coordinate_profile.raw_to_common_vector(
+            (local_position.vx, local_position.vy, local_position.vz),
+        )
         return VehicleState(
             vehicle_id=self.vehicle_id,
-            position=(local_position.x, local_position.y, local_position.z),
-            yaw=local_position.heading,
-            velocity=(local_position.vx, local_position.vy, local_position.vz),
+            position=common_pose.position,
+            yaw=common_pose.yaw,
+            velocity=common_velocity,
             armed=vehicle_status.arming_state == Px4VehicleStatus.ARMING_STATE_ARMED,
             navigation_state=_navigation_state_name(vehicle_status.nav_state),
             offboard_available=bool(

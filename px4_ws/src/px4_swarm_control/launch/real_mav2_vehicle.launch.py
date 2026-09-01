@@ -24,7 +24,16 @@ def generate_launch_description() -> LaunchDescription:
                 executable='vehicle_node',
                 namespace='/MAV2',
                 name='vehicle_node',
-                parameters=[parameters],
+                parameters=[
+                    parameters,
+                    {
+                        'coordinate_profile': 'raw_px4_local',
+                        'common_origin_e_m': 0.0,
+                        'common_origin_n_m': 0.0,
+                        'common_origin_u_m': 0.0,
+                        'hold_z': -1.0,
+                    },
+                ],
                 output='screen',
             ),
         ],

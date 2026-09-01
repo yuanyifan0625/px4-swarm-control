@@ -36,6 +36,7 @@ def generate_launch_description() -> LaunchDescription:
                         'formation_position_tolerance_m': LaunchConfiguration(
                             'formation_position_tolerance_m',
                         ),
+                        'vertical_axis_up': False,
                     },
                 ],
                 output='screen',

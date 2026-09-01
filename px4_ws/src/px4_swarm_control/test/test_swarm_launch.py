@@ -121,6 +121,14 @@ def test_swarm_launch_uses_three_vehicle_yaml_as_parameter_source():
     assert [
         plain_node_parameters(node)['px4_target_system'] for node in vehicle_nodes
     ] == [1, 2, 3]
+    assert all(
+        plain_node_parameters(node)['coordinate_profile'] == 'gazebo_enu_common_world'
+        for node in vehicle_nodes
+    )
+    assert plain_node_parameters(nodes := [
+        entity for entity in launch_description.entities
+        if isinstance(entity, Node) and entity.node_executable == 'ground_station_node'
+    ][0])['vertical_axis_up'] is True
 
 
 def test_real_vehicle_launches_start_one_vehicle_node_each():
@@ -146,6 +154,10 @@ def test_real_vehicle_launches_start_one_vehicle_node_each():
         assert parameters['vehicle_id'] == vehicle_id
         assert parameters['px4_namespace'] == namespace
         assert parameters['slot'] == slot
+        assert parameters['coordinate_profile'] == 'raw_px4_local'
+        assert parameters['common_origin_e_m'] == 0.0
+        assert parameters['common_origin_n_m'] == 0.0
+        assert parameters['common_origin_u_m'] == 0.0
 
 
 def test_real_ground_station_launch_starts_only_ground_station_node():
@@ -162,6 +174,7 @@ def test_real_ground_station_launch_starts_only_ground_station_node():
     ]
     assert private_node_field(nodes[0], 'node_namespace') is None
     assert 'formation_line_abreast_lateral_spacing_m' in plain_node_parameters(nodes[0])
+    assert plain_node_parameters(nodes[0])['vertical_axis_up'] is False
 
 
 def test_swarm_and_real_ground_station_launches_expose_formation_tolerance_override():

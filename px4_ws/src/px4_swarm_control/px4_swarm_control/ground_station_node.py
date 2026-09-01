@@ -64,6 +64,7 @@ class GroundStationConfig:
     staging_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
     staging_trail_spacing_m: float = VEE_TRAIL_SPACING_M
     staging_position_tolerance_m: float = 0.5
+    vertical_axis_up: bool = False
     formation_vee_lateral_spacing_m: float = VEE_LATERAL_SPACING_M
     formation_vee_trail_spacing_m: float = VEE_TRAIL_SPACING_M
     formation_line_abreast_lateral_spacing_m: float = LINE_ABREAST_LATERAL_SPACING_M
@@ -535,7 +536,8 @@ class GroundStationCore:
         altitude_m: float,
         leader_status: VehicleStatus,
     ) -> None:
-        # 起飛 staging 固定用 world frame，保護三機在離地前後維持水平安全間距。
+        # SITL's canonical ENU frame uses +Z up.  The retained real/raw profile
+        # keeps the historical downward-positive staging contract.
         geometry = FormationGeometry(
             vee_lateral_spacing_m=self.config.staging_lateral_spacing_m,
             vee_trail_spacing_m=self.config.staging_trail_spacing_m,
@@ -546,7 +548,11 @@ class GroundStationCore:
         leader = PositionYawSetpoint(
             x=leader_status.x,
             y=leader_status.y,
-            z=leader_status.z - abs(float(altitude_m)),
+            z=leader_status.z + (
+                abs(float(altitude_m))
+                if self.config.vertical_axis_up
+                else -abs(float(altitude_m))
+            ),
             yaw=leader_status.yaw,
         )
         self.staging_targets = {}
@@ -1080,6 +1086,7 @@ class GroundStationNode(Node):
         self.declare_parameter('staging_lateral_spacing_m', VEE_LATERAL_SPACING_M)
         self.declare_parameter('staging_trail_spacing_m', VEE_TRAIL_SPACING_M)
         self.declare_parameter('staging_position_tolerance_m', 0.5)
+        self.declare_parameter('vertical_axis_up', False)
         self.declare_parameter('formation_vee_lateral_spacing_m', VEE_LATERAL_SPACING_M)
         self.declare_parameter('formation_vee_trail_spacing_m', VEE_TRAIL_SPACING_M)
         self.declare_parameter(
@@ -1106,6 +1113,7 @@ class GroundStationNode(Node):
             staging_position_tolerance_m=float(
                 self.get_parameter('staging_position_tolerance_m').value,
             ),
+            vertical_axis_up=bool(self.get_parameter('vertical_axis_up').value),
             formation_vee_lateral_spacing_m=float(
                 self.get_parameter('formation_vee_lateral_spacing_m').value,
             ),

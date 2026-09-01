@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import cos, hypot, isfinite, sin
+from math import hypot, isfinite
 from typing import Mapping
 
 from px4_swarm_control.models import PositionYawSetpoint, Slot
+from px4_swarm_control.geometry import body_offset_to_world_delta
 
 
 @dataclass(frozen=True)
@@ -281,8 +282,11 @@ def _slot_fallback_target(
         return None
     assert own_observation is not None
     body_left_sign = 1.0 if slot is Slot.FOLLOWER_LEFT else -1.0
-    delta_x = -sin(leader_yaw) * body_left_sign * config.fallback_step_m
-    delta_y = cos(leader_yaw) * body_left_sign * config.fallback_step_m
+    delta_x, delta_y = body_offset_to_world_delta(
+        yaw=leader_yaw,
+        forward_m=0.0,
+        left_m=body_left_sign * config.fallback_step_m,
+    )
     if abs(delta_x) < 1e-12:
         delta_x = 0.0
     if abs(delta_y) < 1e-12:

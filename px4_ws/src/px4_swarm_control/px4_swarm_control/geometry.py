@@ -101,10 +101,11 @@ def body_offset_to_world(
 ) -> PositionYawSetpoint:
     """Rotate a leader body-frame offset into the world frame."""
     forward_m, left_m, up_m = body_offset
-    yaw = leader_setpoint.yaw
-    # 以 leader yaw 旋轉 body offset，保護左右隊形在轉向後仍維持相對方向。
-    world_dx = forward_m * cos(yaw) - left_m * sin(yaw)
-    world_dy = forward_m * sin(yaw) + left_m * cos(yaw)
+    world_dx, world_dy = body_offset_to_world_delta(
+        yaw=leader_setpoint.yaw,
+        forward_m=forward_m,
+        left_m=left_m,
+    )
 
     return PositionYawSetpoint(
         x=leader_setpoint.x + world_dx,
@@ -114,9 +115,22 @@ def body_offset_to_world(
     )
 
 
+def body_offset_to_world_delta(
+    *,
+    yaw: float,
+    forward_m: float,
+    left_m: float,
+) -> tuple[float, float]:
+    """Convert ENU body forward/physical-left metres to world E/N delta."""
+    return (
+        forward_m * cos(yaw) - left_m * sin(yaw),
+        forward_m * sin(yaw) + left_m * cos(yaw),
+    )
+
+
 def _slot_left_distance(slot: Slot, lateral_spacing_m: float) -> float:
     if slot is Slot.FOLLOWER_LEFT:
-        return -lateral_spacing_m
+        return lateral_spacing_m
     if slot is Slot.FOLLOWER_RIGHT:
-        return  lateral_spacing_m
+        return -lateral_spacing_m
     raise ValueError(f'unsupported follower slot: {slot}')

@@ -83,7 +83,7 @@ def test_final_manual_covers_fixed_sitl_baseline_and_takeoff_safety():
     assert 'GZ_IP=127.0.0.1' in text
     assert 'param set NAV_DLL_ACT 0' in text
     assert 'ros2 launch px4_swarm_control swarm_nodes.launch.py' in text
-    assert 'ros2 run px4_swarm_control operator_console' in text
+    assert 'ros2 launch px4_swarm_control operator_console.launch.py' in text
     assert '/MAV1/fmu/out/vehicle_local_position_v1' in text
     assert '/MAV1/status' in text
     assert 'command 22' in text

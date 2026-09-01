@@ -24,8 +24,8 @@ def test_vee_follower_slots_from_leader_yaw_zero_keep_left_and_right_signs():
         geometry,
     )
 
-    assert_setpoint_close(left, PositionYawSetpoint(7.0, 16.0, -5.0, 0.0))
-    assert_setpoint_close(right, PositionYawSetpoint(7.0, 24.0, -5.0, 0.0))
+    assert_setpoint_close(left, PositionYawSetpoint(7.0, 24.0, -5.0, 0.0))
+    assert_setpoint_close(right, PositionYawSetpoint(7.0, 16.0, -5.0, 0.0))
 
 
 def test_vee_follower_slots_rotate_with_leader_yaw_ninety_degrees():
@@ -40,8 +40,8 @@ def test_vee_follower_slots_rotate_with_leader_yaw_ninety_degrees():
         geometry,
     )
 
-    assert_setpoint_close(left, PositionYawSetpoint(14.0, 17.0, -5.0, pi / 2.0))
-    assert_setpoint_close(right, PositionYawSetpoint(6.0, 17.0, -5.0, pi / 2.0))
+    assert_setpoint_close(left, PositionYawSetpoint(6.0, 17.0, -5.0, pi / 2.0))
+    assert_setpoint_close(right, PositionYawSetpoint(14.0, 17.0, -5.0, pi / 2.0))
 
 
 def test_vee_follower_slots_rotate_with_leader_yaw_one_eighty_degrees():
@@ -56,5 +56,5 @@ def test_vee_follower_slots_rotate_with_leader_yaw_one_eighty_degrees():
         geometry,
     )
 
-    assert_setpoint_close(left, PositionYawSetpoint(13.0, 24.0, -5.0, pi))
-    assert_setpoint_close(right, PositionYawSetpoint(13.0, 16.0, -5.0, pi))
+    assert_setpoint_close(left, PositionYawSetpoint(13.0, 16.0, -5.0, pi))
+    assert_setpoint_close(right, PositionYawSetpoint(13.0, 24.0, -5.0, pi))

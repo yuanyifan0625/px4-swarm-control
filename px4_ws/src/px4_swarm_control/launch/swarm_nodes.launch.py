@@ -57,7 +57,10 @@ def generate_launch_description() -> LaunchDescription:
                 executable='vehicle_node',
                 namespace=vehicle.namespace,
                 name='vehicle_node',
-                parameters=[vehicle_parameters[vehicle.vehicle_id]],
+                parameters=[
+                    vehicle_parameters[vehicle.vehicle_id],
+                    {'coordinate_profile': 'gazebo_enu_common_world'},
+                ],
                 output='screen',
             ),
         )
@@ -71,6 +74,7 @@ def generate_launch_description() -> LaunchDescription:
                     'formation_position_tolerance_m': LaunchConfiguration(
                         'formation_position_tolerance_m',
                     ),
+                    'vertical_axis_up': True,
                 },
             ],
             output='screen',

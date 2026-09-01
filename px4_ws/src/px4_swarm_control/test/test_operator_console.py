@@ -272,7 +272,7 @@ def test_ros_gateway_reports_stale_leader_telemetry_for_relative_commands(monkey
     )
 
 
-def test_field_frame_jog_commands_convert_to_absolute_ned_goal():
+def test_field_frame_jog_commands_convert_to_absolute_common_enu_goal():
     config = OperatorConsoleConfig(
         move_step_x_m=1.0,
         move_step_y_m=1.0,
@@ -291,14 +291,14 @@ def test_field_frame_jog_commands_convert_to_absolute_ned_goal():
     dispatcher.dispatch('5')
 
     move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
-    assert move_calls[0][1:5] == (1.0, 3.0, -5.0, 0.0)
-    assert move_calls[1][1:5] == (2.0, 2.0, -5.0, 0.0)
-    assert move_calls[2][1:5] == (1.0, 2.0, -6.0, 0.0)
+    assert move_calls[0][1:5] == (2.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:5] == (1.0, 3.0, -5.0, 0.0)
+    assert move_calls[2][1:5] == (1.0, 2.0, -4.0, 0.0)
     assert move_calls[3][1:4] == (1.0, 2.0, -5.0)
     assert isclose(move_calls[3][4], pi / 4.0)
 
 
-def test_negative_field_frame_jog_commands_convert_to_absolute_ned_goals():
+def test_negative_field_frame_jog_commands_convert_to_absolute_common_enu_goals():
     config = OperatorConsoleConfig(
         move_step_x_m=1.0,
         move_step_y_m=1.0,
@@ -317,9 +317,9 @@ def test_negative_field_frame_jog_commands_convert_to_absolute_ned_goals():
     dispatcher.dispatch('c')
 
     move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
-    assert move_calls[0][1:5] == (1.0, 1.0, -5.0, 0.0)
-    assert move_calls[1][1:5] == (0.0, 2.0, -5.0, 0.0)
-    assert move_calls[2][1:5] == (1.0, 2.0, -4.0, 0.0)
+    assert move_calls[0][1:5] == (0.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:5] == (1.0, 1.0, -5.0, 0.0)
+    assert move_calls[2][1:5] == (1.0, 2.0, -6.0, 0.0)
     assert move_calls[3][1:4] == (1.0, 2.0, -5.0)
     assert isclose(move_calls[3][4], -pi / 4.0)
 
@@ -327,7 +327,7 @@ def test_negative_field_frame_jog_commands_convert_to_absolute_ned_goals():
 def test_operator_console_defaults_use_small_field_operation_profile():
     config = OperatorConsoleConfig()
 
-    assert config.takeoff_altitude_m == 1.5
+    assert config.takeoff_altitude_m == 0.5
     assert config.move_step_x_m == 1.0
     assert config.move_step_y_m == 1.0
     assert config.yaw_step_rad == pi / 6.0
@@ -382,7 +382,7 @@ def test_demo_macro_runs_settle_steps_and_tracks_successful_formation_mode():
 
     assert result.success is True
     assert gateway.calls == [
-        ('takeoff', 1.5, 60.0),
+        ('takeoff', 0.5, 60.0),
         ('move_leader', 0.0, 0.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('change_formation', 'line_abreast', 60.0),
         ('settle', 'line_abreast', 1.5, 30.0, 0.02, 0.25),
@@ -455,16 +455,16 @@ def test_demo_macro_home_yaw_rotates_current_leader_pose_to_home_yaw_before_home
 
     assert result.success is True
     move_calls = [call for call in gateway.calls if call[0] == 'move_leader']
-    assert move_calls[0][1:5] == (1.0, 3.0, -5.0, 0.0)
-    assert move_calls[1][1:4] == (1.0, 3.0, -5.0)
+    assert move_calls[0][1:5] == (2.0, 2.0, -5.0, 0.0)
+    assert move_calls[1][1:4] == (2.0, 2.0, -5.0)
     assert isclose(move_calls[1][4], pi / 6.0)
-    assert move_calls[2][1:5] == (1.0, 3.0, -5.0, 0.0)
+    assert move_calls[2][1:5] == (2.0, 2.0, -5.0, 0.0)
     assert move_calls[3][1:5] == (1.0, 2.0, -5.0, 0.0)
     assert gateway.calls == [
-        ('takeoff', 1.5, 60.0),
-        ('move_leader', 1.0, 3.0, -5.0, 0.0, 0.3, 0.2, 60.0),
-        ('move_leader', 1.0, 3.0, -5.0, pi / 6.0, 0.3, 0.2, 60.0),
-        ('move_leader', 1.0, 3.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('takeoff', 0.5, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, pi / 6.0, 0.3, 0.2, 60.0),
+        ('move_leader', 2.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('settle', 'vee', 1.5, 30.0, 0.02, 0.25),
         ('move_leader', 1.0, 2.0, -5.0, 0.0, 0.3, 0.2, 60.0),
         ('settle', 'vee', 1.5, 30.0, 0.02, 0.25),
@@ -487,7 +487,7 @@ def test_demo_macro_stops_when_settle_times_out():
     assert result.success is False
     assert 'formation settle timed out' in result.message
     assert gateway.calls == [
-        ('takeoff', 1.5, 60.0),
+        ('takeoff', 0.5, 60.0),
         ('settle', 'vee', 1.5, 30.0, 0.02, 0.25),
     ]
 
@@ -504,8 +504,8 @@ def test_demo_macro_stops_on_first_failed_action():
     assert result.success is False
     assert 'move failed' in result.message
     assert gateway.calls == [
-        ('takeoff', 1.5, 60.0),
-        ('move_leader', 0.0, 1.0, -5.0, 0.0, 0.3, 0.2, 60.0),
+        ('takeoff', 0.5, 60.0),
+        ('move_leader', 1.0, 0.0, -5.0, 0.0, 0.3, 0.2, 60.0),
     ]
 
 
@@ -527,17 +527,17 @@ def test_help_text_lists_negative_field_frame_jog_commands():
     result = dispatcher.dispatch('h')
 
     assert result.success is True
-    assert 'x: move leader field -X step' in result.message
-    assert 'y: move leader field -Y step' in result.message
-    assert 'z: move leader field down by altitude step' in result.message
+    assert 'x: move leader Gazebo ENU -X (West) step' in result.message
+    assert 'y: move leader Gazebo ENU -Y (South) step' in result.message
+    assert 'z: move leader down by altitude step' in result.message
     assert 'c: rotate leader yaw - step' in result.message
 
 
 def test_formation_settle_ready_uses_leader_state_and_fixed_follower_slots():
     statuses = {
         1: leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
-        2: follower_status(2, 'follower_left', x=9.0, y=19.0),
-        3: follower_status(3, 'follower_right', x=9.0, y=21.0),
+        2: follower_status(2, 'follower_left', x=9.0, y=21.0),
+        3: follower_status(3, 'follower_right', x=9.0, y=19.0),
     }
 
     assert formation_settle_ready(statuses, 'vee', OperatorConsoleConfig()) is True
@@ -579,8 +579,8 @@ def test_formation_settle_gate_requires_continuous_stable_window():
     gate = FormationSettleGate(config, now_s=now_s)
     ready_statuses = {
         1: leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
-        2: follower_status(2, 'follower_left', x=9.0, y=19.0),
-        3: follower_status(3, 'follower_right', x=9.0, y=21.0),
+        2: follower_status(2, 'follower_left', x=9.0, y=21.0),
+        3: follower_status(3, 'follower_right', x=9.0, y=19.0),
     }
 
     assert gate.update(ready_statuses, 'vee') is False

@@ -41,10 +41,17 @@ source install/setup.bash
 ros2 launch px4_swarm_control swarm_nodes.launch.py
 ```
 
-另一 terminal 執行：
+此 launch 使用 `gazebo_enu_common_world`：上層的 `(x, y, z, yaw)` 是
+Gazebo `(East, North, Up)`，`yaw=0` 朝 East、正值朝 North。只有
+`Px4VehicleInterface` 會把它轉為各 MAV 自己的 PX4 raw local 座標；MAV2/
+MAV3 的 spawn origin 已在 YAML 設定，不能把三台 raw `(0,0,0)` 當作同一個
+物理點。
+
+另一 terminal 執行（此 launch 載入固定的 0.5 m 起飛設定）：
 
 ```bash
-ros2 run px4_swarm_control operator_console
+export ROS_DOMAIN_ID=42
+ros2 launch px4_swarm_control operator_console.launch.py
 ```
 
 ## Takeoff 驗證
@@ -69,10 +76,34 @@ mode 與 ARM，絕不可出現 command 22。若 takeoff timeout，GroundStation 
 PAUSE；RESUME 不會重啟逾時流程。land complete 後，下一輪 takeoff 必須等待 fresh
 staging anchor。
 
+## SITL ENU 軸向人工驗收
+
+起飛並確認三台都在穩定 VEE 後，以 `operator_console` 逐項操作 `2`、`x`、
+`3`、`y`、`4`、`z`（每次等 setpoint 穩定）。在 Gazebo 觀察 MAV1，並以另一
+terminal 對照：
+
+```bash
+ros2 topic echo --once /MAV1/status
+ros2 topic echo --once /MAV1/fmu/in/trajectory_setpoint
+ros2 topic echo --once /MAV1/fmu/out/vehicle_local_position_v1
+```
+
+- `2` / `x`：Gazebo 分別 East / West；raw trajectory `y` 分別增加 / 減少。
+- `3` / `y`：Gazebo 分別 North / South；raw trajectory `x` 分別增加 / 減少。
+- `4` / `z`：Gazebo 分別 Up / Down；raw trajectory `z` 分別減少 / 增加。
+- `+` / `-`：比較 status yaw 與 raw `heading`，符合
+  `wrap(pi/2 - heading + 0.102)`；MAV1、MAV2、MAV3 都各做一次。
+
+再切換 `5`（VEE）與 `6`（LINE_ABREAST），在 leader yaw `0`、`+pi/2`、
+`pi`、`-pi/2` 觀察 follower 仍在物理左／右；安全 fallback 出現時也必須往
+遠離 peer 的方向移動。這些是 SITL 驗收，不可將 direct PX4 command 當作正常
+操作入口。
+
 ## Cleanup
 
 每輪 runtime 結束後，停止這次啟動的 swarm nodes、PX4、Agent 與 Gazebo，再確認：
 
 ```bash
 pgrep -af '[M]icroXRCEAgent|[b]uild/px4_sitl_default/bin/px4|[g]z sim|[g]zserver' || true
+pgrep -af '[v]ehicle_node|[g]round_station_node|[o]perator_console' || true
 ```

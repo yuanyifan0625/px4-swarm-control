@@ -9,6 +9,10 @@ MAV1:
     control_loop_hz: 50.0
     status_loop_hz: 50.0
     telemetry_timeout_s: 0.5
+    coordinate_profile: gazebo_enu_common_world
+    common_origin_e_m: 0.0
+    common_origin_n_m: 0.0
+    common_origin_u_m: 0.0
     following_vee_lateral_spacing_m: 1.0
     following_vee_trail_spacing_m: 1.0
     following_line_abreast_lateral_spacing_m: 1.0
@@ -17,7 +21,7 @@ MAV1:
     safety_fallback_step_m: 0.3
     hold_x: 0.0
     hold_y: 0.0
-    hold_z: -1.0
+    hold_z: 0.5
     hold_yaw: 0.0
 
 MAV2:
@@ -30,6 +34,10 @@ MAV2:
     control_loop_hz: 50.0
     status_loop_hz: 50.0
     telemetry_timeout_s: 0.5
+    coordinate_profile: gazebo_enu_common_world
+    common_origin_e_m: -1.0
+    common_origin_n_m: 1.0
+    common_origin_u_m: 0.0
     following_vee_lateral_spacing_m: 1.0
     following_vee_trail_spacing_m: 1.0
     following_line_abreast_lateral_spacing_m: 1.0
@@ -38,7 +46,7 @@ MAV2:
     safety_fallback_step_m: 0.3
     hold_x: 0.0
     hold_y: 0.0
-    hold_z: -1.0
+    hold_z: 0.5
     hold_yaw: 0.0
 
 MAV3:
@@ -51,6 +59,10 @@ MAV3:
     control_loop_hz: 50.0
     status_loop_hz: 50.0
     telemetry_timeout_s: 0.5
+    coordinate_profile: gazebo_enu_common_world
+    common_origin_e_m: -1.0
+    common_origin_n_m: -1.0
+    common_origin_u_m: 0.0
     following_vee_lateral_spacing_m: 1.0
     following_vee_trail_spacing_m: 1.0
     following_line_abreast_lateral_spacing_m: 1.0
@@ -59,7 +71,7 @@ MAV3:
     safety_fallback_step_m: 0.3
     hold_x: 0.0
     hold_y: 0.0
-    hold_z: -1.0
+    hold_z: 0.5
     hold_yaw: 0.0
 
 ground_station_node:
