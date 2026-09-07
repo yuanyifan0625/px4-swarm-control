@@ -10,3 +10,16 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.ulg
+.agents/
+.scratch/
+assets/
+docs/
+lessons/
+reference/
+
+AGENTS.md
+CONTEXT.md
+MISSION.md
+NOTES.md
+RESOURCES.md
+skills-lock.json
