@@ -51,7 +51,7 @@ MAV3 的 spawn origin 已在 YAML 設定，不能把三台 raw `(0,0,0)` 當作�
 
 ```bash
 export ROS_DOMAIN_ID=42
-ros2 launch px4_swarm_control operator_console.launch.py
+ros2 run px4_swarm_control operator_console
 ```
 
 ## Takeoff 驗證

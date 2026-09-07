@@ -11,7 +11,10 @@ __pycache__/
 *.ulg
 .agents/
 .scratch/
-assets/
+assets/*
+!assets/demo/
+!assets/demo/qgc-three-vehicle-connected.png
+!assets/demo/three-vehicle-formation-demo.mp4
 docs/
 lessons/
 reference/
