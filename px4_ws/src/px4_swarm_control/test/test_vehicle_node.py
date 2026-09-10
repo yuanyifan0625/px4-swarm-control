@@ -734,6 +734,32 @@ def test_takeoff_switches_to_full_staging_only_after_local_ned_height_gate():
 
     assert core.vehicle_level_state is VehicleLevelState.STAGING
 
+    # A delayed duplicate TAKEOFF must not restart a completed takeoff after a
+    # separate safety condition has moved the vehicle out of STAGING.
+    core.transition_to(VehicleLevelState.HOLDING, 'leader status stale')
+    core.handle_mission_command(takeoff)
+
+    assert core.vehicle_level_state is VehicleLevelState.HOLDING
+
+
+def test_follower_staging_holds_its_own_target_without_leader_status():
+    px4_interface = FakePx4Interface(
+        state=vehicle_state(x=1.0, y=2.0, z=-5.0, yaw=0.3),
+    )
+    core = make_core(
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+    staging = staging_setpoint(x=-1.0, y=1.0, z=-5.0, yaw=0.3)
+    staging.vehicle_id = 2
+
+    core.handle_staging_setpoint(staging)
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.STAGING
+    assert px4_interface.setpoints[-1] == PositionYawSetpoint(-1.0, 1.0, -5.0, 0.3)
+    assert px4_interface.safe_hover_calls == 0
+
 
 def test_takeoff_waits_without_commands_until_local_position_is_ready():
     px4_interface = FakePx4Interface(

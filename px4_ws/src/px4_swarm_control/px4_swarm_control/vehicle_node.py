@@ -120,6 +120,7 @@ class VehicleNodeCore:
         self._warned_ignored_leader_goal = False
         self._warned_mismatched_vehicle_state = False
         self._takeoff_phase = _TakeoffPhase.IDLE
+        self._takeoff_completed = False
         self._pending_takeoff_until_staging = False
         self._staging_setpoint_received = False
         self._vertical_takeoff_setpoint: Optional[PositionYawSetpoint] = None
@@ -190,19 +191,17 @@ class VehicleNodeCore:
             self.transition_to(VehicleLevelState.ARMING, 'arm command accepted')
             return
         if msg.command == MissionCommand.TAKEOFF:
-            state = self.px4_interface.vehicle_state()
-            if (
-                self.vehicle_level_state is VehicleLevelState.STAGING
-                and state is not None
-                and state.armed
-                and state.navigation_state == 'offboard'
-            ):
+            # TAKEOFF is retransmitted while GroundStation waits for every
+            # vehicle.  Once this vehicle has reached staging, a delayed copy
+            # must not restart its local takeoff state machine.
+            if self._takeoff_completed:
                 return
             self._start_takeoff_without_qgc()
             return
         if msg.command == MissionCommand.LAND:
             self._leader_goal_active = False
             self._clear_takeoff_phase()
+            self._takeoff_completed = False
             self._pending_takeoff_until_staging = False
             self._land_complete_recovery_sent = False
             # 降落代表任務輪次結束，清掉 staging latch 以保護下一輪不吃上一輪目標。
@@ -269,7 +268,10 @@ class VehicleNodeCore:
             else:
                 self.px4_interface.publish_safe_hover_setpoint()
             return
-        if self.config.role is VehicleRole.FOLLOWER:
+        if (
+            self.config.role is VehicleRole.FOLLOWER
+            and self.vehicle_level_state is not VehicleLevelState.STAGING
+        ):
             if not self._update_follower_setpoint(state):
                 # leader 資訊過期時不追舊 setpoint，保護 follower 不被 stale leader 狀態拖走。
                 next_state = (
@@ -286,7 +288,11 @@ class VehicleNodeCore:
 
         # 每個 tick 都補 heartbeat/setpoint，保護 PX4 Offboard mode 不因間隔過久退出。
         self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
-        if self.config.role is VehicleRole.FOLLOWER and self._leader_telemetry_untrusted():
+        if (
+            self.config.role is VehicleRole.FOLLOWER
+            and self.vehicle_level_state is not VehicleLevelState.STAGING
+            and self._leader_telemetry_untrusted()
+        ):
             next_state = VehicleLevelState.FAILSAFE
         elif self.vehicle_level_state is VehicleLevelState.STAGING:
             next_state = VehicleLevelState.STAGING
@@ -436,6 +442,7 @@ class VehicleNodeCore:
                 self._set_takeoff_phase(_TakeoffPhase.STAGING)
                 self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
                 self.transition_to(VehicleLevelState.STAGING, 'vertical takeoff complete')
+                self._takeoff_completed = True
                 self._clear_takeoff_phase()
 
     def _takeoff_command_due(self) -> bool:
@@ -474,6 +481,7 @@ class VehicleNodeCore:
     def _transition_to_landed(self, state) -> None:
         self._run_land_complete_recovery(state)
         self._clear_takeoff_phase()
+        self._takeoff_completed = False
         self._staging_setpoint_received = False
         self.transition_to(VehicleLevelState.LANDED, 'PX4 landed telemetry')
 
