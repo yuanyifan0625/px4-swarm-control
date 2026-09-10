@@ -268,10 +268,8 @@ class VehicleNodeCore:
             else:
                 self.px4_interface.publish_safe_hover_setpoint()
             return
-        if (
-            self.config.role is VehicleRole.FOLLOWER
-            and self.vehicle_level_state is not VehicleLevelState.STAGING
-        ):
+        follower_should_follow = self._follower_should_follow()
+        if follower_should_follow:
             if not self._update_follower_setpoint(state):
                 # leader 資訊過期時不追舊 setpoint，保護 follower 不被 stale leader 狀態拖走。
                 next_state = (
@@ -290,16 +288,16 @@ class VehicleNodeCore:
         self.px4_interface.publish_position_yaw_setpoint(self.active_setpoint)
         if (
             self.config.role is VehicleRole.FOLLOWER
-            and self.vehicle_level_state is not VehicleLevelState.STAGING
+            and follower_should_follow
             and self._leader_telemetry_untrusted()
         ):
             next_state = VehicleLevelState.FAILSAFE
-        elif self.vehicle_level_state is VehicleLevelState.STAGING:
-            next_state = VehicleLevelState.STAGING
         elif (
             self._leader_goal_active or follower_setpoint_active
         ) and not self._collision_safety_holding:
             next_state = VehicleLevelState.FOLLOWING
+        elif self.vehicle_level_state is VehicleLevelState.STAGING:
+            next_state = VehicleLevelState.STAGING
         else:
             next_state = VehicleLevelState.HOLDING
         self.transition_to(next_state, 'active setpoint published')
@@ -358,6 +356,16 @@ class VehicleNodeCore:
             return False
         self.active_setpoint = decision.target
         return True
+
+    def _follower_should_follow(self) -> bool:
+        if self.config.role is not VehicleRole.FOLLOWER:
+            return False
+        if self.vehicle_level_state is not VehicleLevelState.STAGING:
+            return True
+        return leader_status_is_fresh(
+            self.leader_status,
+            self.config.telemetry_timeout_s,
+        )
 
     def _leader_status_is_stale(self) -> bool:
         if self.leader_status is None:

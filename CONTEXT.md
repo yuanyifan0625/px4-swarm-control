@@ -56,3 +56,6 @@
   has released the control and the swarm must hold.
 - **Manual jog intent**: A short-lived world-frame planar motion request from
   keyboard jog mode, which expires unless the operator console renews it.
+- **Following-ready leader status**: A fresh MAV1 status that reports armed,
+  Offboard, and `following`; it permits a staged follower to begin calculating
+  its formation slot offset.

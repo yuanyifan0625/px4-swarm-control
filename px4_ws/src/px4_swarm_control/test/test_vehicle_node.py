@@ -761,6 +761,51 @@ def test_follower_staging_holds_its_own_target_without_leader_status():
     assert px4_interface.safe_hover_calls == 0
 
 
+def test_staged_follower_holds_target_until_leader_is_following():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+    staging = staging_setpoint(x=-1.0, y=1.0, z=-5.0, yaw=0.0)
+    staging.vehicle_id = 2
+    core.handle_staging_setpoint(staging)
+    core.handle_leader_status(
+        leader_status(
+            x=10.0,
+            y=20.0,
+            z=-5.0,
+            yaw=0.0,
+            vehicle_state='staging',
+        ),
+    )
+
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.STAGING
+    assert px4_interface.setpoints[-1] == PositionYawSetpoint(-1.0, 1.0, -5.0, 0.0)
+
+
+def test_staged_follower_begins_following_on_following_ready_leader_status():
+    px4_interface = FakePx4Interface()
+    core = make_core(
+        config=follower_config('MAV2', Slot.FOLLOWER_LEFT),
+        px4_interface=px4_interface,
+    )
+    staging = staging_setpoint(x=-1.0, y=1.0, z=-5.0, yaw=0.0)
+    staging.vehicle_id = 2
+    core.handle_staging_setpoint(staging)
+    prepare_safe_follower_telemetry(core, px4_interface, 'MAV2')
+    core.handle_leader_status(
+        leader_status(x=10.0, y=20.0, z=-5.0, yaw=0.0),
+    )
+
+    core.control_tick()
+
+    assert core.vehicle_level_state is VehicleLevelState.FOLLOWING
+    assert px4_interface.setpoints[-1] == PositionYawSetpoint(9.0, 21.0, -5.0, 0.0)
+
+
 def test_takeoff_waits_without_commands_until_local_position_is_ready():
     px4_interface = FakePx4Interface(
         state=vehicle_state(armed=False), local_ready=False,
