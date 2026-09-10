@@ -730,6 +730,10 @@ def test_takeoff_switches_to_full_staging_only_after_local_ned_height_gate():
     assert px4_interface.setpoints[-1] == PositionYawSetpoint(7.0, 8.0, -5.0, 0.9)
     assert core.vehicle_level_state is VehicleLevelState.STAGING
 
+    core.handle_mission_command(takeoff)
+
+    assert core.vehicle_level_state is VehicleLevelState.STAGING
+
 
 def test_takeoff_waits_without_commands_until_local_position_is_ready():
     px4_interface = FakePx4Interface(

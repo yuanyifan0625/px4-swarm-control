@@ -1269,6 +1269,22 @@ def test_republish_takeoff_request_resends_staging_targets_and_takeoff_command()
     assert publishers.mission_command.messages[-1].command == MissionCommand.TAKEOFF
 
 
+def test_completed_takeoff_does_not_republish_takeoff_command():
+    core, publishers, _ = make_core()
+    publish_fresh_staging_anchor(core)
+    request = TakeoffSwarm.Goal()
+    request.altitude_m = 5.0
+    request.timeout_sec = 30.0
+    core.start_takeoff(request)
+    publish_staged_statuses(core)
+    published_before_completion = len(publishers.mission_command.messages)
+
+    core.republish_takeoff_request()
+
+    assert core.takeoff_result().success is True
+    assert len(publishers.mission_command.messages) == published_before_completion
+
+
 def test_vehicle_status_detects_all_staged_and_logs_progress_once():
     core, _, logger = make_core()
     publish_fresh_staging_anchor(core)

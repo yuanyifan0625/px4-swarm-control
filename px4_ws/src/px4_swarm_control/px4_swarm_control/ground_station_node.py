@@ -673,6 +673,8 @@ class GroundStationCore:
             self._publish_vehicle_setpoint(vehicle_id, target)
 
     def republish_takeoff_request(self) -> None:
+        if self.mission_state is not MissionState.TAKING_OFF:
+            return
         self.republish_staging_setpoints()
         if self._takeoff_reason is None:
             return

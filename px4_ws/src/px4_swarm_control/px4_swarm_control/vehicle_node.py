@@ -190,6 +190,14 @@ class VehicleNodeCore:
             self.transition_to(VehicleLevelState.ARMING, 'arm command accepted')
             return
         if msg.command == MissionCommand.TAKEOFF:
+            state = self.px4_interface.vehicle_state()
+            if (
+                self.vehicle_level_state is VehicleLevelState.STAGING
+                and state is not None
+                and state.armed
+                and state.navigation_state == 'offboard'
+            ):
+                return
             self._start_takeoff_without_qgc()
             return
         if msg.command == MissionCommand.LAND:
