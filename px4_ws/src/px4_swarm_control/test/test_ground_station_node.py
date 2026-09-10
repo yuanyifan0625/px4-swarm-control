@@ -20,6 +20,8 @@ from px4_swarm_interfaces.msg import (
     FailsafeCommand,
     FormationMode,
     LeaderGoal,
+    ManualJog,
+    ManualJogStatus,
     MissionCommand,
     VehicleSetpoint,
     VehicleStatus,
@@ -56,6 +58,7 @@ def make_core(now_stamp=None, now_s=None):
     publishers = GroundStationPublishers(
         mission_command=FakePublisher(),
         leader_goal=FakePublisher(),
+        manual_jog_status=FakePublisher(),
         formation_mode=FakePublisher(),
         failsafe_command=FakePublisher(),
         vehicle_setpoints=vehicle_setpoints,
@@ -385,6 +388,62 @@ def test_move_leader_action_publishes_world_frame_leader_goal_without_follower_t
     assert publishers.vehicle_setpoints[1].messages == []
     assert publishers.vehicle_setpoints[2].messages == []
     assert publishers.vehicle_setpoints[3].messages == []
+
+
+def test_manual_jog_advances_one_world_axis_after_takeoff_and_holds_on_expiry():
+    clock = [10.0]
+    core, publishers, _ = make_core(now_s=lambda: clock[0])
+    publish_safe_following_statuses(core)
+    core.mission_state = MissionState.STAGING
+    core.vehicle_statuses[2].y = 1.0
+    core.vehicle_statuses[3].y = -1.0
+    jog = ManualJog()
+    jog.x_direction = 1.0
+    jog.y_direction = 0.0
+
+    core.handle_manual_jog(jog)
+    clock[0] = 10.1
+    core.advance_manual_jog()
+
+    assert core.mission_state is MissionState.FOLLOWING
+    assert isclose(publishers.leader_goal.messages[-1].x, 0.05)
+    assert publishers.leader_goal.messages[-1].y == 0.0
+
+    clock[0] = 10.4
+    core.advance_manual_jog()
+
+    assert core.manual_jog_active is False
+    assert publishers.leader_goal.messages[-1].x == 0.0
+    assert publishers.leader_goal.messages[-1].y == 0.0
+
+
+def test_manual_jog_collision_rejection_holds_and_requires_release():
+    clock = [10.0]
+    core, publishers, _ = make_core(now_s=lambda: clock[0])
+    publish_safe_following_statuses(core)
+    core.mission_state = MissionState.STAGING
+    core.vehicle_statuses[2].x = 0.7
+    core.vehicle_statuses[2].y = 0.0
+    core.vehicle_statuses[3].y = -1.0
+    jog = ManualJog()
+    jog.x_direction = 1.0
+    jog.y_direction = 0.0
+
+    core.handle_manual_jog(jog)
+    clock[0] = 10.1
+    core.advance_manual_jog()
+
+    assert core.manual_jog_active is False
+    assert core.manual_jog_requires_release is True
+    assert publishers.leader_goal.messages[-1].x == 0.0
+
+    release = ManualJog()
+    core.handle_manual_jog(release)
+    core.handle_manual_jog(jog)
+    clock[0] = 10.2
+    core.advance_manual_jog()
+
+    assert core.manual_jog_requires_release is True
 
 
 def test_move_leader_rejects_goal_too_close_to_actual_follower_with_reason():

@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
+import select
+import sys
+import termios
+import tty
 from dataclasses import dataclass
 from math import isfinite, pi, sqrt
 from time import monotonic
@@ -41,6 +46,8 @@ from px4_swarm_interfaces.action import (
     TakeoffSwarm,
 )
 from px4_swarm_interfaces.msg import VehicleStatus
+from px4_swarm_interfaces.msg import ManualJog
+from px4_swarm_interfaces.msg import ManualJogStatus
 
 
 @dataclass(frozen=True)
@@ -63,6 +70,7 @@ class OperatorConsoleConfig:
     yaw_step_rad: float = YAW_STEP_RAD
     move_position_tolerance_m: float = 0.3
     move_yaw_tolerance_rad: float = 0.2
+    keyboard_jog_deadman_s: float = 0.15
     status_wait_timeout_s: float = 2.0
     relative_command_max_status_age_s: float = 0.2
     settle_stable_duration_s: float = SETTLE_STABLE_DURATION_S
@@ -156,6 +164,7 @@ class ConsoleCommandDispatcher:
         self._config = config
         self._gateway = gateway
         self._active_formation = FormationMode.VEE.value
+        self._keyboard_jog_enabled = False
 
     def dispatch(self, command: str) -> ConsoleActionResult:
         command = command.strip()
@@ -164,16 +173,19 @@ class ConsoleCommandDispatcher:
         if command in {'s', 'status'}:
             return ConsoleActionResult(True, self._gateway.describe_status())
         if command in {'p', 'pause'}:
+            self._keyboard_jog_enabled = False
             return self._gateway.pause(True, 'operator console pause')
         if command in {'r', 'resume'}:
             return self._gateway.pause(False, 'operator console resume')
         if command == '0':
             return self._run_arm_command()
         if command == '1':
-            return self._gateway.takeoff(
+            result = self._gateway.takeoff(
                 self._config.takeoff_altitude_m,
                 self._config.default_timeout_sec,
             )
+            self._keyboard_jog_enabled = result.success
+            return result
         if command in {'2', '3', '4', '5', 'x', 'y', 'z', 'c'}:
             return self._run_motion_command(command)
         if command == '6':
@@ -183,10 +195,18 @@ class ConsoleCommandDispatcher:
         if command == 'settle':
             return self._run_settle_command()
         if command == '8':
+            self._keyboard_jog_enabled = False
             return self._gateway.land(self._config.default_timeout_sec)
         if command == '9':
             return self._run_demo_macro()
         return ConsoleActionResult(False, f'unknown command: {command}. Use h for help.')
+
+    def begin_keyboard_jog_mode(self) -> ConsoleActionResult:
+        if not self._keyboard_jog_enabled:
+            return ConsoleActionResult(False, 'keyboard jog requires successful takeoff')
+        if self._gateway.is_paused():
+            return ConsoleActionResult(False, 'keyboard jog blocked while swarm is paused')
+        return ConsoleActionResult(True, 'keyboard jog enabled')
 
     def _run_arm_command(self) -> ConsoleActionResult:
         if self._gateway.is_paused():
@@ -337,6 +357,11 @@ class RosSwarmActionGateway:
         )
         self._pause_client = ActionClient(node, PauseSwarm, '/swarm/pause')
         self._land_client = ActionClient(node, LandSwarm, '/swarm/land')
+        self._manual_jog_publisher = node.create_publisher(
+            ManualJog,
+            '/swarm/manual_jog',
+            QoSProfile(depth=1),
+        )
         self._subscriptions = [
             node.create_subscription(
                 VehicleStatus,
@@ -346,6 +371,12 @@ class RosSwarmActionGateway:
             )
             for vehicle in FIRST_VERSION_VEHICLES
         ]
+        self._manual_jog_status_subscription = node.create_subscription(
+            ManualJogStatus,
+            '/swarm/manual_jog_status',
+            self._handle_manual_jog_status,
+            QoSProfile(depth=1),
+        )
 
     def get_leader_status(
         self,
@@ -479,6 +510,10 @@ class RosSwarmActionGateway:
             self._status_update_counts.get(msg.vehicle_id, 0) + 1
         )
 
+    def _handle_manual_jog_status(self, msg: ManualJogStatus) -> None:
+        if not msg.active and msg.reason:
+            self._node.get_logger().warning(f'manual jog blocked: {msg.reason}')
+
     def _spin_for_status(self, vehicle_id: int, previous_update_count: int) -> None:
         deadline = monotonic() + self._config.status_wait_timeout_s
         while (
@@ -505,6 +540,12 @@ class RosSwarmActionGateway:
         result = result_future.result().result
         return ConsoleActionResult(bool(result.success), result.message)
 
+    def publish_manual_jog(self, x_direction: float, y_direction: float) -> None:
+        msg = ManualJog()
+        msg.x_direction = x_direction
+        msg.y_direction = y_direction
+        self._manual_jog_publisher.publish(msg)
+
 
 class OperatorConsoleNode(Node):
     """ROS 2 node wrapper for the terminal operator console."""
@@ -525,6 +566,7 @@ class OperatorConsoleNode(Node):
         self.declare_parameter('yaw_step_deg', YAW_STEP_DEG)
         self.declare_parameter('move_position_tolerance_m', 0.3)
         self.declare_parameter('move_yaw_tolerance_rad', 0.2)
+        self.declare_parameter('keyboard_jog_deadman_s', 0.15)
         self.declare_parameter('status_wait_timeout_s', 2.0)
         self.declare_parameter('relative_command_max_status_age_s', 0.2)
         self.declare_parameter('settle_stable_duration_s', SETTLE_STABLE_DURATION_S)
@@ -574,6 +616,7 @@ class OperatorConsoleNode(Node):
                 self.get_parameter('move_position_tolerance_m').value
             ),
             move_yaw_tolerance_rad=float(self.get_parameter('move_yaw_tolerance_rad').value),
+            keyboard_jog_deadman_s=float(self.get_parameter('keyboard_jog_deadman_s').value),
             status_wait_timeout_s=float(self.get_parameter('status_wait_timeout_s').value),
             relative_command_max_status_age_s=float(
                 self.get_parameter('relative_command_max_status_age_s').value
@@ -614,8 +657,118 @@ def run_interactive_console(node: OperatorConsoleNode) -> None:
             break
         if command.strip() in {'q', 'quit'}:
             break
+        if command.strip() == 'k':
+            enabled = node.dispatcher.begin_keyboard_jog_mode()
+            if not enabled.success:
+                print('FAIL: ' + enabled.message)
+                continue
+            run_keyboard_jog_mode(node)
+            continue
         result = node.dispatcher.dispatch(command)
         print(('OK: ' if result.success else 'FAIL: ') + result.message)
+
+
+def run_keyboard_jog_mode(node: OperatorConsoleNode) -> None:
+    """Read raw terminal keys while publishing only expiring world-frame intent."""
+    if not sys.stdin.isatty():
+        print('FAIL: keyboard jog mode requires an interactive TTY')
+        return
+    keyboard = KeyboardJogController(
+        node.gateway.publish_manual_jog,
+        deadman_s=node.config.keyboard_jog_deadman_s,
+    )
+    fd = sys.stdin.fileno()
+    previous = termios.tcgetattr(fd)
+    print('keyboard jog: arrows move; Esc returns; p pauses; 8 lands')
+    try:
+        tty.setcbreak(fd)
+        while rclpy.ok():
+            ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+            if ready:
+                key = _read_terminal_key(fd)
+                command = keyboard.handle_key(key)
+                if command is not None:
+                    keyboard.stop()
+                    if command == 'escape':
+                        return
+                    result = node.dispatcher.dispatch(command)
+                    print(('OK: ' if result.success else 'FAIL: ') + result.message)
+                    return
+            keyboard.tick()
+            rclpy.spin_once(node, timeout_sec=0.0)
+    finally:
+        keyboard.stop()
+        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+
+
+def _read_terminal_key(fd: int) -> str:
+    """Read an ANSI arrow atomically enough to distinguish it from Escape."""
+    key = os.read(fd, 1)
+    if key != b'\x1b':
+        return key.decode(errors='ignore')
+    parts = [key]
+    for _ in range(2):
+        ready, _, _ = select.select([fd], [], [], 0.02)
+        if not ready:
+            break
+        parts.append(os.read(fd, 1))
+    return b''.join(parts).decode(errors='ignore')
+
+
+class KeyboardJogController:
+    """TTY key parser that keeps one cardinal manual jog heartbeat live."""
+
+    _DIRECTIONS = {
+        '\x1b[A': (1.0, 0.0),
+        '\x1b[B': (-1.0, 0.0),
+        '\x1b[D': (0.0, 1.0),
+        '\x1b[C': (0.0, -1.0),
+    }
+
+    def __init__(
+        self,
+        publish: Callable[[float, float], None],
+        *,
+        deadman_s: float,
+        now_s: Callable[[], float] = monotonic,
+    ) -> None:
+        self._publish = publish
+        self._deadman_s = deadman_s
+        self._now_s = now_s
+        self._last_direction_s: float | None = None
+        self._direction: tuple[float, float] | None = None
+        self._active = False
+
+    def handle_key(self, key: str) -> str | None:
+        direction = self._DIRECTIONS.get(key)
+        if direction is not None:
+            self._publish(*direction)
+            self._direction = direction
+            self._last_direction_s = self._now_s()
+            self._active = True
+            return None
+        if key == '\x1b':
+            return 'escape'
+        if key in {'p', '8'}:
+            return key
+        return None
+
+    def tick(self) -> None:
+        if (
+            self._active
+            and self._last_direction_s is not None
+            and self._now_s() - self._last_direction_s > self._deadman_s
+        ):
+            self.stop()
+        elif self._active and self._direction is not None:
+            self._publish(*self._direction)
+
+    def stop(self) -> None:
+        if self._active:
+            self._publish(0.0, 0.0)
+            self._active = False
+            self._last_direction_s = None
+            self._direction = None
 
 
 def main(args: Iterable[str] | None = None) -> None:
@@ -671,6 +824,7 @@ def _help_text() -> str:
         '  r: resume\n'
         '  q: quit\n'
         '  h: help\n'
+        '  k: enter keyboard jog mode (arrows move; Esc returns)\n'
         '  0: ArmSwarm without takeoff\n'
         '  1: TakeoffSwarm\n'
         '  2: move leader Gazebo ENU +X (East) step\n'

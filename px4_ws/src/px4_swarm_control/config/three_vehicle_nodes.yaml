@@ -86,3 +86,5 @@ ground_station_node:
     formation_yaw_tolerance_rad: 0.1
     telemetry_fresh_timeout_s: 1.0
     safety_minimum_horizontal_distance_m: 0.7
+    manual_jog_speed_mps: 0.5
+    manual_jog_deadman_s: 0.25

@@ -5,6 +5,7 @@ from px4_swarm_control.operator_console import (
     ConsoleActionResult,
     ConsoleCommandDispatcher,
     FormationSettleGate,
+    KeyboardJogController,
     OperatorConsoleConfig,
     RosSwarmActionGateway,
     SwarmActionGateway,
@@ -168,6 +169,9 @@ def test_ros_gateway_subscribes_to_mav_status_topics(monkeypatch):
             self.subscriptions.append((msg_type, topic, callback, qos))
             return topic
 
+        def create_publisher(self, msg_type, topic, qos):
+            return topic
+
     monkeypatch.setattr(operator_console, 'ActionClient', FakeActionClient)
 
     node = FakeNode()
@@ -177,7 +181,37 @@ def test_ros_gateway_subscribes_to_mav_status_topics(monkeypatch):
         '/MAV1/status',
         '/MAV2/status',
         '/MAV3/status',
+        '/swarm/manual_jog_status',
     ]
+
+
+def test_keyboard_jog_controller_maps_world_axes_and_stops_after_deadman():
+    clock = [0.0]
+    published = []
+    keyboard = KeyboardJogController(
+        lambda x, y: published.append((x, y)),
+        deadman_s=0.15,
+        now_s=lambda: clock[0],
+    )
+
+    assert keyboard.handle_key('\x1b[A') is None
+    clock[0] = 0.1
+    assert keyboard.handle_key('\x1b[D') is None
+    clock[0] = 0.26
+    keyboard.tick()
+
+    assert published == [(1.0, 0.0), (0.0, 1.0), (0.0, 0.0)]
+
+
+def test_keyboard_jog_controller_exits_or_runs_safe_shortcuts():
+    published = []
+    keyboard = KeyboardJogController(lambda x, y: published.append((x, y)), deadman_s=0.15)
+
+    assert keyboard.handle_key('x') is None
+    assert keyboard.handle_key('\x1b') == 'escape'
+    assert keyboard.handle_key('p') == 'p'
+    assert keyboard.handle_key('8') == '8'
+    assert published == []
 
 
 def test_ros_gateway_waits_for_a_new_leader_status_before_returning_cached_pose(
@@ -194,6 +228,9 @@ def test_ros_gateway_waits_for_a_new_leader_status_before_returning_cached_pose(
         def create_subscription(self, _msg_type, topic, callback, _qos):
             self.callbacks[topic] = callback
             return topic
+
+        def create_publisher(self, *_args):
+            return None
 
     monkeypatch.setattr(operator_console, 'ActionClient', FakeActionClient)
     node = FakeNode()
@@ -226,6 +263,9 @@ def test_ros_gateway_rejects_a_cached_leader_status_when_no_new_status_arrives(
         def create_subscription(self, *_args):
             return None
 
+        def create_publisher(self, *_args):
+            return None
+
     monkeypatch.setattr(operator_console, 'ActionClient', FakeActionClient)
     gateway = RosSwarmActionGateway(
         FakeNode(),
@@ -248,6 +288,9 @@ def test_ros_gateway_reports_stale_leader_telemetry_for_relative_commands(monkey
         def create_subscription(self, _msg_type, topic, callback, _qos):
             self.callbacks[topic] = callback
             return topic
+
+        def create_publisher(self, *_args):
+            return None
 
     monkeypatch.setattr(operator_console, 'ActionClient', FakeActionClient)
     node = FakeNode()

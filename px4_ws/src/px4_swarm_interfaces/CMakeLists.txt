@@ -19,6 +19,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/FailsafeCommand.msg"
   "msg/FormationMode.msg"
   "msg/LeaderGoal.msg"
+  "msg/ManualJog.msg"
+  "msg/ManualJogStatus.msg"
   "msg/MissionCommand.msg"
   "msg/VehicleSetpoint.msg"
   "msg/VehicleStatus.msg"

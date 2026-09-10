@@ -9,6 +9,7 @@ operator_console:
     yaw_step_deg: 30.0
     move_position_tolerance_m: 0.3
     move_yaw_tolerance_rad: 0.2
+    keyboard_jog_deadman_s: 0.15
     status_wait_timeout_s: 2.0
     relative_command_max_status_age_s: 0.2
     settle_stable_duration_s: 1.5

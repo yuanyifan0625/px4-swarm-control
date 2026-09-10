@@ -52,6 +52,8 @@ MAV3 的 spawn origin 已在 YAML 設定，不能把三台 raw `(0,0,0)` 當作�
 ```bash
 export ROS_DOMAIN_ID=42
 ros2 run px4_swarm_control operator_console
+# 或使用共用參數檔：
+ros2 launch px4_swarm_control operator_console.launch.py
 ```
 
 ## Takeoff 驗證
@@ -98,6 +100,14 @@ ros2 topic echo --once /MAV1/fmu/out/vehicle_local_position_v1
 `pi`、`-pi/2` 觀察 follower 仍在物理左／右；安全 fallback 出現時也必須往
 遠離 peer 的方向移動。這些是 SITL 驗收，不可將 direct PX4 command 當作正常
 操作入口。
+
+## Keyboard jog 驗收
+
+在 `1` 成功完成 takeoff 後，輸入 `k` 進入 keyboard jog mode。按住 `↑`/`↓`
+分別讓整個 formation 沿 canonical Gazebo ENU `+X`/`-X` 位移；按住 `←`/`→`
+分別沿 `+Y`/`-Y` 位移。放開後約 250 ms 內應 hold。第一版不支援斜向；最新
+方向鍵取代前一個方向。`Esc` 回到 command mode；`p` 或 `8` 會先停止 jog 再執行
+pause 或 land。不要在 keyboard mode 以外直接發佈 `/swarm/manual_jog`。
 
 ## Cleanup
 

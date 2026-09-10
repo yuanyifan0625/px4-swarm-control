@@ -30,6 +30,8 @@ def test_package_exposes_initial_contract_names():
     )
     assert EXPECTED_MESSAGES == (
         "LeaderGoal",
+        "ManualJog",
+        "ManualJogStatus",
         "FormationMode",
         "MissionCommand",
         "FailsafeCommand",

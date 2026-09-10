@@ -43,6 +43,8 @@ from px4_swarm_interfaces.msg import (
     FailsafeCommand,
     FormationMode,
     LeaderGoal,
+    ManualJog,
+    ManualJogStatus,
     MissionCommand,
     VehicleSetpoint,
     VehicleStatus,
@@ -53,6 +55,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import QoSProfile
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,8 @@ class GroundStationConfig:
     formation_yaw_tolerance_rad: float = 0.2
     telemetry_fresh_timeout_s: float = 1.0
     safety_minimum_horizontal_distance_m: float = 0.7
+    manual_jog_speed_mps: float = 0.5
+    manual_jog_deadman_s: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,7 @@ class GroundStationPublishers:
 
     mission_command: object
     leader_goal: object
+    manual_jog_status: object
     formation_mode: object
     failsafe_command: object
     vehicle_setpoints: Dict[int, object]
@@ -146,6 +152,100 @@ class GroundStationCore:
         self._formation_established_logged = False
         self._land_started_s: float | None = None
         self._land_timeout_s: float | None = None
+        self._manual_jog_direction: tuple[float, float] | None = None
+        self._manual_jog_last_received_s: float | None = None
+        self._manual_jog_last_tick_s: float | None = None
+        self._manual_jog_requires_release = False
+        self._manual_jog_last_rejection = ''
+
+    @property
+    def manual_jog_active(self) -> bool:
+        return self._manual_jog_direction is not None
+
+    @property
+    def manual_jog_requires_release(self) -> bool:
+        return self._manual_jog_requires_release
+
+    def handle_manual_jog(self, msg: ManualJog) -> None:
+        direction = (float(msg.x_direction), float(msg.y_direction))
+        if direction == (0.0, 0.0):
+            self._manual_jog_requires_release = False
+            self._manual_jog_last_rejection = ''
+            self._hold_manual_jog()
+            return
+        if not _is_cardinal_direction(direction):
+            self._reject_manual_jog('manual jog requires one cardinal direction')
+            return
+        if self._manual_jog_requires_release:
+            self._reject_manual_jog('release required after safety rejection')
+            return
+        if self.mission_state not in {MissionState.STAGING, MissionState.FOLLOWING}:
+            self._reject_manual_jog('manual jog requires completed takeoff')
+            return
+        if self._manual_jog_leader_status() is None:
+            self._reject_manual_jog('manual jog requires fresh MAV1 Offboard telemetry')
+            return
+        self._manual_jog_last_rejection = ''
+        self._manual_jog_direction = direction
+        self._manual_jog_last_received_s = self.now_s()
+        if self._manual_jog_last_tick_s is None:
+            self._manual_jog_last_tick_s = self.now_s()
+
+    def advance_manual_jog(self) -> None:
+        if self._manual_jog_direction is None:
+            return
+        now_s = self.now_s()
+        if (
+            self._manual_jog_last_received_s is None
+            or now_s - self._manual_jog_last_received_s > self.config.manual_jog_deadman_s
+        ):
+            self._hold_manual_jog()
+            return
+        leader = self._manual_jog_leader_status()
+        if leader is None:
+            self._hold_manual_jog()
+            return
+        previous_tick_s = self._manual_jog_last_tick_s or now_s
+        self._manual_jog_last_tick_s = now_s
+        base = self._leader_goal or PositionYawSetpoint(
+            leader.x, leader.y, leader.z, leader.yaw,
+        )
+        x_direction, y_direction = self._manual_jog_direction
+        target = PositionYawSetpoint(
+            base.x + x_direction * self.config.manual_jog_speed_mps * (now_s - previous_tick_s),
+            base.y + y_direction * self.config.manual_jog_speed_mps * (now_s - previous_tick_s),
+            base.z,
+            base.yaw,
+        )
+        safety = self._leader_movement_safety_for_target(target)
+        if not safety.allowed:
+            self._manual_jog_requires_release = True
+            self._publish_manual_jog_status(False, safety.reason)
+            self._manual_jog_last_rejection = safety.reason
+            self._hold_manual_jog_at_last_safe_target()
+            return
+        self._transition_to(MissionState.FOLLOWING, 'manual jog accepted')
+        self._publish_leader_goal(target)
+
+    def _hold_manual_jog(self) -> None:
+        self._stop_manual_jog()
+        leader = self._manual_jog_leader_status()
+        if leader is not None:
+            self._publish_leader_goal(
+                PositionYawSetpoint(leader.x, leader.y, leader.z, leader.yaw),
+            )
+
+    def _hold_manual_jog_at_last_safe_target(self) -> None:
+        self._stop_manual_jog()
+        if self._leader_goal is not None:
+            self._publish_leader_goal(self._leader_goal)
+        else:
+            self._hold_manual_jog()
+
+    def _stop_manual_jog(self) -> None:
+        self._manual_jog_direction = None
+        self._manual_jog_last_received_s = None
+        self._manual_jog_last_tick_s = None
 
     def start_arm(self, request: ArmSwarm.Goal):
         if self.mission_state is MissionState.PAUSED:
@@ -274,6 +374,7 @@ class GroundStationCore:
         return None
 
     def start_move_leader(self, request: MoveLeader.Goal):
+        self._stop_manual_jog()
         if self.mission_state is MissionState.PAUSED:
             # Pause 期間拒絕新移動，保護 operator 以為系統停住時仍偷偷更新目標。
             self._move_leader_rejection = 'MoveLeader rejected while swarm is paused'
@@ -343,6 +444,7 @@ class GroundStationCore:
         return None
 
     def start_change_formation(self, request: ChangeFormation.Goal) -> ChangeFormation.Feedback:
+        self._stop_manual_jog()
         if self.mission_state is MissionState.PAUSED:
             # Pause 期間拒絕隊形變換，保護 followers 不在 operator 暫停時改追新 slot。
             self._change_formation_rejection = (
@@ -742,6 +844,35 @@ class GroundStationCore:
             ),
         )
 
+    def _leader_movement_safety_for_target(self, target: PositionYawSetpoint):
+        request = MoveLeader.Goal()
+        request.x, request.y, request.z, request.yaw = (
+            target.x, target.y, target.z, target.yaw,
+        )
+        request.position_tolerance_m = 0.3
+        request.yaw_tolerance_rad = 0.2
+        return self._leader_movement_safety(request)
+
+    def _publish_manual_jog_status(self, active: bool, reason: str) -> None:
+        status = ManualJogStatus()
+        status.active = active
+        status.reason = reason
+        self.publishers.manual_jog_status.publish(status)
+
+    def _reject_manual_jog(self, reason: str) -> None:
+        if reason != self._manual_jog_last_rejection:
+            self._publish_manual_jog_status(False, reason)
+            self._manual_jog_last_rejection = reason
+
+    def _publish_leader_goal(self, target: PositionYawSetpoint) -> None:
+        msg = LeaderGoal()
+        msg.stamp = self.now_stamp()
+        msg.frame_id = 'world'
+        msg.x, msg.y, msg.z, msg.yaw = target.x, target.y, target.z, target.yaw
+        self._leader_goal = target
+        self._leader_goal_message = msg
+        self.publishers.leader_goal.publish(msg)
+
     def _leader_status(self) -> VehicleStatus | None:
         return self.vehicle_statuses.get(1)
 
@@ -764,6 +895,15 @@ class GroundStationCore:
         if status is None or status.vehicle_state != VehicleLevelState.FOLLOWING.value:
             return None
         if not _status_pose_is_finite(status):
+            return None
+        return status
+
+    def _manual_jog_leader_status(self) -> VehicleStatus | None:
+        status = self._fresh_leader_status()
+        if status is None or status.vehicle_state not in {
+            VehicleLevelState.STAGING.value,
+            VehicleLevelState.FOLLOWING.value,
+        }:
             return None
         return status
 
@@ -873,6 +1013,9 @@ class GroundStationCore:
         self._move_leader_position_tolerance_m = None
         self._move_leader_yaw_tolerance_rad = None
         self._move_leader_rejection = None
+        self._manual_jog_direction = None
+        self._manual_jog_last_received_s = None
+        self._manual_jog_last_tick_s = None
 
     def _clear_change_formation_state(self) -> None:
         self._change_formation_started_s = None
@@ -894,6 +1037,7 @@ class GroundStationNode(Node):
         publishers = GroundStationPublishers(
             mission_command=self.create_publisher(MissionCommand, 'mission_command', 10),
             leader_goal=self.create_publisher(LeaderGoal, 'leader_goal', 10),
+            manual_jog_status=self.create_publisher(ManualJogStatus, 'manual_jog_status', 10),
             formation_mode=self.create_publisher(FormationMode, 'formation_mode', 10),
             failsafe_command=self.create_publisher(
                 FailsafeCommand,
@@ -925,6 +1069,14 @@ class GroundStationNode(Node):
             )
             for vehicle in FIRST_VERSION_VEHICLES
         ]
+        self.manual_jog_subscription = self.create_subscription(
+            ManualJog,
+            'manual_jog',
+            self.core.handle_manual_jog,
+            QoSProfile(depth=1),
+            callback_group=self.callback_group,
+        )
+        self.manual_jog_timer = self.create_timer(0.1, self.core.advance_manual_jog)
         self.action_servers = (
             ActionServer(
                 self,
@@ -1100,6 +1252,8 @@ class GroundStationNode(Node):
         self.declare_parameter('formation_yaw_tolerance_rad', 0.2)
         self.declare_parameter('telemetry_fresh_timeout_s', 1.0)
         self.declare_parameter('safety_minimum_horizontal_distance_m', 0.7)
+        self.declare_parameter('manual_jog_speed_mps', 0.5)
+        self.declare_parameter('manual_jog_deadman_s', 0.25)
 
     def _load_config(self) -> GroundStationConfig:
         return GroundStationConfig(
@@ -1135,6 +1289,8 @@ class GroundStationNode(Node):
             safety_minimum_horizontal_distance_m=float(
                 self.get_parameter('safety_minimum_horizontal_distance_m').value,
             ),
+            manual_jog_speed_mps=float(self.get_parameter('manual_jog_speed_mps').value),
+            manual_jog_deadman_s=float(self.get_parameter('manual_jog_deadman_s').value),
         )
 
 
@@ -1144,6 +1300,10 @@ def default_ground_station_config() -> GroundStationConfig:
 
 def _supported_formation_modes() -> set[str]:
     return {mode.value for mode in InternalFormationMode}
+
+
+def _is_cardinal_direction(direction: tuple[float, float]) -> bool:
+    return direction in {(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)}
 
 
 def _position_close(

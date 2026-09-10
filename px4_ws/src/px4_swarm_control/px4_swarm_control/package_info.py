@@ -11,6 +11,8 @@ EXPECTED_ACTIONS = (
 
 EXPECTED_MESSAGES = (
     "LeaderGoal",
+    "ManualJog",
+    "ManualJogStatus",
     "FormationMode",
     "MissionCommand",
     "FailsafeCommand",
